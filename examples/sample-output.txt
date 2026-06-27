@@ -4,7 +4,7 @@ PLEX DOCTOR - RESUMEN
 
 Servidor: plex-server
 Fecha: 2026-06-27T12:34:56+02:00
-Versión: 0.2.2
+Versión: 0.2.3
 
 Sistema ............ 🟢 OK
 CPU ................ 🟡 Load alto
@@ -22,7 +22,7 @@ Problemas detectados:
 🟡 Plex Transcoder activo con varios procesos (5)
 
 Notas informativas:
-ℹ️ sqlite3 del sistema no soporta collation ICU de la DB de Plex; quick_check inconcluso, no corrupción confirmada.
+ℹ️ No se ejecuta quick_check externo sobre la DB de Plex; se usan logs reales para detectar corrupción/bloqueos.
 
 Causa probable:
 El servidor parece inestable por problema de mount/rclone o I/O, no por Plex directamente.
@@ -32,7 +32,7 @@ Interpretación:
 - Hay transcodificación activa. Esto puede explicar load alto, CPU alta y errores EAE, sobre todo con subtítulos quemados, audio EAC3/DTS o clientes poco compatibles.
 
 Plan de actuación recomendado:
-1. Confirmar versión y dependencias: bash plex-doctor.sh --version; si falta sqlite3, usar sudo bash plex-doctor.sh --install-deps.
+1. Confirmar versión y dependencias opcionales: bash plex-doctor.sh --version; sudo bash plex-doctor.sh --install-deps.
 2. Revisar almacenamiento antes que Plex: comprobar que los mounts rclone responden, mirar logs de rclone y confirmar que el disco/cache no está saturado.
 3. Guardar /tmp/plex-doctor-full.log y comparar con una segunda ejecución cuando el problema esté ocurriendo.
 4. Evitar cambios destructivos hasta identificar causa: no borrar DB/cache ni desmontar rutas sin backup o ventana de mantenimiento.

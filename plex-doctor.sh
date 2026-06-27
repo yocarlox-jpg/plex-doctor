@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="0.2.2"
+VERSION="0.2.3"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
 INSTALL_OPTIONAL_DEPS=0
@@ -132,13 +132,6 @@ install_optional_deps() {
 
   printf "%s%s Instalando dependencias opcionales antes del diagnóstico.%s\n" "$C_YELLOW" "$WARN_ICON" "$C_RESET"
   bash "$installer"
-}
-
-show_dependency_hint() {
-  if ! have sqlite3; then
-    printf "%s%s Recomendado: sqlite3 no está instalado; sin él no puedo hacer PRAGMA quick_check de la DB de Plex.%s\n" "$C_YELLOW" "$WARN_ICON" "$C_RESET"
-    printf "%s   Para instalar dependencias opcionales: sudo bash plex-doctor.sh --install-deps%s\n" "$C_DIM" "$C_RESET"
-  fi
 }
 
 add_problem() {
@@ -286,7 +279,7 @@ collect_system() {
 collect_plex() {
   section "2. Plex"
 
-  local plex_active transcoder_count port_listen log_dir db_file db_size quick_check plex_errors journal_errors
+  local plex_active transcoder_count port_listen log_dir db_file db_size plex_errors journal_errors
 
   if have systemctl; then
     plex_active="$(systemctl is-active plexmediaserver 2>/dev/null || true)"
@@ -379,7 +372,7 @@ collect_plex() {
     fi
     if printf "%s\n" "$plex_errors" | grep -Eiq 'Sleeping for .*busy DB|database is locked'; then
       add_problem "$WARN_ICON" "Plex detecta DB ocupada/bloqueada temporalmente"
-      add_recommendation "comprobar DB con sqlite3 y revisar tareas pesadas de librería"
+      add_recommendation "revisar tareas pesadas de librería y logs de Plex relacionados con DB"
     fi
     if printf "%s\n" "$plex_errors" | grep -Eiq 'Session appears to have died|TranscodeOutputStream'; then
       add_info "Alguna sesión de transcodificación murió; puede ser cliente que cerró reproducción si no coincide con quejas de usuario."
@@ -394,25 +387,8 @@ collect_plex() {
   if [[ -f "$db_file" ]]; then
     db_size="$(du -h "$db_file" 2>/dev/null | awk '{print $1}')"
     print_kv "Tamaño DB" "${db_size:-desconocido}"
-    if have sqlite3; then
-      quick_check="$(sqlite3 "file:${db_file}?mode=ro" "PRAGMA quick_check;" 2>&1 || true)"
-      print_kv "PRAGMA quick_check" "$quick_check"
-      if [[ "$quick_check" == "ok" ]]; then
-        PLEX_DB_STATUS="${OK_ICON} OK"
-      elif printf "%s\n" "$quick_check" | grep -Eiq 'no such collation sequence: icu'; then
-        PLEX_DB_STATUS="${WARN_ICON} quick_check inconcluso"
-        add_info "sqlite3 del sistema no soporta collation ICU de la DB de Plex; quick_check inconcluso, no corrupción confirmada."
-        add_recommendation "no asumir corrupción de DB por icu_root; revisar DB solo si hay síntomas o logs de corrupción"
-      else
-        PLEX_DB_STATUS="${BAD_ICON} quick_check falla"
-        add_problem "$BAD_ICON" "sqlite3 PRAGMA quick_check no devuelve ok para la DB de Plex"
-        add_recommendation "revisar integridad de la DB de Plex"
-      fi
-    else
-      PLEX_DB_STATUS="${WARN_ICON} sqlite3 no instalado"
-      add_problem "$WARN_ICON" "sqlite3 no instalado; no se pudo comprobar la DB de Plex"
-      add_recommendation "instalar sqlite3 con sudo bash install.sh"
-    fi
+    PLEX_DB_STATUS="${OK_ICON} Tamaño leído"
+    add_info "No se ejecuta quick_check externo sobre la DB de Plex; se usan logs reales para detectar corrupción/bloqueos."
   else
     PLEX_DB_STATUS="${WARN_ICON} DB no encontrada"
     add_problem "$WARN_ICON" "no se encontró la DB de Plex en la ruta estándar"
@@ -705,7 +681,7 @@ probable_cause() {
 
   if printf "%s\n" "$joined" | grep -Eiq 'mount|rclone|I/O wait|I/O'; then
     echo "El servidor parece inestable por problema de mount/rclone o I/O, no por Plex directamente."
-  elif printf "%s\n" "$joined" | grep -Eiq 'quick_check|errores de base de datos|integridad de la DB'; then
+  elif printf "%s\n" "$joined" | grep -Eiq 'errores de base de datos|integridad de la DB'; then
     echo "El síntoma principal apunta a la base de datos de Plex o a errores internos de Plex."
   elif printf "%s\n" "$joined" | grep -Eiq 'Transcoder'; then
     echo "La carga actual parece venir sobre todo de transcodificaciones activas en Plex."
@@ -736,8 +712,8 @@ write_interpretation() {
   if printf "%s\n" "$joined" | grep -Eiq 'Transcoder activo|transcodificación'; then
     echo "- Hay transcodificación activa. Esto puede explicar load alto, CPU alta y errores EAE, sobre todo con subtítulos quemados, audio EAC3/DTS o clientes poco compatibles."
   fi
-  if printf "%s\n" "$joined" | grep -Eiq 'DB ocupada|DB.*bloqueada|quick_check|base de datos|sqlite3'; then
-    echo "- La DB de Plex merece revisión. Si solo falta sqlite3, no significa corrupción; significa que todavía no se pudo verificar."
+  if printf "%s\n" "$joined" | grep -Eiq 'DB ocupada|DB.*bloqueada|base de datos'; then
+    echo "- La DB de Plex merece revisión solo porque hay señales reales en logs; no se usa sqlite3 externo como prueba de salud."
   fi
   if printf "%s\n" "$joined" | grep -Eiq 'perfil de cliente'; then
     echo "- Los errores de perfil de cliente suelen venir de TVs/apps concretas. Normalmente no tiran Plex, pero pueden forzar transcodificación o provocar reproducción irregular."
@@ -761,14 +737,14 @@ write_action_plan() {
   joined="$(printf "%s\n" "${PROBLEMS[@]:-}")"
 
   echo "Plan de actuación recomendado:"
-  echo "1. Confirmar versión y dependencias: bash plex-doctor.sh --version; si falta sqlite3, usar sudo bash plex-doctor.sh --install-deps."
+  echo "1. Confirmar versión y dependencias opcionales: bash plex-doctor.sh --version; sudo bash plex-doctor.sh --install-deps."
 
   if printf "%s\n" "$joined" | grep -Eiq 'mount roto|no responde correctamente|rclone|I/O wait|errores I/O'; then
     echo "2. Revisar almacenamiento antes que Plex: comprobar que los mounts rclone responden, mirar logs de rclone y confirmar que el disco/cache no está saturado."
   elif printf "%s\n" "$joined" | grep -Eiq 'Transcoder activo|transcodificación'; then
     echo "2. Revisar sesiones activas en Plex: identificar usuarios/dispositivos que transcodifican, subtítulos quemados y audios que obligan a convertir."
-  elif printf "%s\n" "$joined" | grep -Eiq 'quick_check|DB ocupada|base de datos|sqlite3'; then
-    echo "2. Verificar DB Plex: instalar sqlite3 y repetir el doctor; si quick_check falla, priorizar backup y mantenimiento de DB."
+  elif printf "%s\n" "$joined" | grep -Eiq 'DB ocupada|base de datos'; then
+    echo "2. Revisar DB Plex solo si hay síntomas reales o logs de corrupción; priorizar backup antes de mantenimiento."
   else
     echo "2. Atacar primero los problemas rojos del resumen; si solo hay amarillos, repetir prueba durante el fallo real."
   fi
@@ -855,7 +831,6 @@ main() {
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     printf "%s%s Recomendado: ejecutar con sudo para leer todos los logs.%s\n" "$C_YELLOW" "$WARN_ICON" "$C_RESET"
   fi
-  show_dependency_hint
 
   collect_system
   collect_plex

@@ -50,7 +50,7 @@ El resumen incluye:
 
 ## Instalación de dependencias opcionales
 
-El script funciona sin dependencias raras, pero puede dar más información si instalas herramientas estándar. `sqlite3` es especialmente recomendable porque permite comprobar la base de datos de Plex con `PRAGMA quick_check`.
+El script funciona sin dependencias raras, pero puede dar más información si instalas herramientas estándar.
 
 ```bash
 sudo bash install.sh
@@ -64,7 +64,6 @@ sudo bash plex-doctor.sh --install-deps
 
 El instalador usa `apt-get` e instala:
 
-- `sqlite3`
 - `smartmontools`
 - `sysstat`
 - `lm-sensors`
@@ -97,7 +96,7 @@ El instalador usa `apt-get` e instala:
 - últimos errores relevantes en logs Plex
 - interpretación de errores comunes de Plex
 - tamaño de la base de datos
-- `PRAGMA quick_check` de la DB si existe `sqlite3`
+- no ejecuta `sqlite3` sobre la DB; usa tamaño y logs reales para detectar señales de corrupción o bloqueo
 
 ### Discos
 

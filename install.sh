@@ -3,7 +3,6 @@
 set -euo pipefail
 
 PACKAGES=(
-  sqlite3
   smartmontools
   sysstat
   lm-sensors

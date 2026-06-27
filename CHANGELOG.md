@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3
+
+- Elimina `sqlite3` de las dependencias recomendadas e instaladas.
+- Elimina `PRAGMA quick_check` del diagnóstico normal para evitar verificaciones externas no fiables sobre la DB de Plex.
+- La DB se evalúa por tamaño y por señales reales en logs de Plex.
+
 ## 0.2.2
 
 - Separa notas informativas de problemas que afectan a la salud del servidor.
