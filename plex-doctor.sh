@@ -2,10 +2,10 @@
 
 set -uo pipefail
 
-VERSION="0.3.0"
+VERSION="0.4.0"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
-INSTALL_OPTIONAL_DEPS=0
+AUTO_INSTALL_DEPS=1
 
 if [[ -t 1 ]]; then
   C_RESET=$'\033[0m'
@@ -53,14 +53,18 @@ usage() {
 Uso:
   sudo bash plex-doctor.sh
   sudo bash plex-doctor.sh --install-deps
+  sudo bash plex-doctor.sh --no-install-deps
 
 Opciones:
-  --install-deps           Instala dependencias opcionales con apt-get antes del diagnóstico.
+  --install-deps           Instala dependencias de diagnóstico con apt-get antes del diagnóstico.
   --install-optional-deps  Alias de --install-deps.
+  --no-install-deps        No instala nada; ejecuta solo las comprobaciones disponibles.
+  --read-only              Alias de --no-install-deps.
   --version                Muestra la versión y termina.
   -h, --help               Muestra esta ayuda.
 
-Modo normal: solo lectura, no modifica el sistema.
+Modo normal: puede instalar herramientas estándar de diagnóstico si faltan.
+No reinicia servicios, no borra archivos y no cambia configuración de Plex/rclone/discos.
 EOF
 }
 
@@ -69,7 +73,10 @@ parse_args() {
   for arg in "$@"; do
     case "$arg" in
       --install-deps|--install-optional-deps)
-        INSTALL_OPTIONAL_DEPS=1
+        AUTO_INSTALL_DEPS=1
+        ;;
+      --no-install-deps|--read-only)
+        AUTO_INSTALL_DEPS=0
         ;;
       -h|--help)
         usage
@@ -108,30 +115,43 @@ have() {
   command -v "$1" >/dev/null 2>&1
 }
 
-script_dir() {
-  cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd
-}
+install_missing_diagnostic_deps() {
+  local missing_packages=()
 
-install_optional_deps() {
-  local dir installer
+  have smartctl || missing_packages+=("smartmontools")
+  have iostat || missing_packages+=("sysstat")
+  have sensors || missing_packages+=("lm-sensors")
+  have ethtool || missing_packages+=("ethtool")
+
+  if ((${#missing_packages[@]} == 0)); then
+    return
+  fi
+
+  if (( AUTO_INSTALL_DEPS == 0 )); then
+    add_info "Faltan herramientas de diagnóstico (${missing_packages[*]}), pero se omitió la instalación por --no-install-deps."
+    printf "%s%s Faltan herramientas de diagnóstico: %s%s\n" "$C_YELLOW" "$WARN_ICON" "${missing_packages[*]}" "$C_RESET"
+    return
+  fi
+
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    printf "%s%s Para instalar dependencias opcionales ejecuta con sudo.%s\n" "$C_RED" "$BAD_ICON" "$C_RESET"
-    exit 1
+    add_info "Faltan herramientas de diagnóstico (${missing_packages[*]}). Ejecuta con sudo para instalarlas automáticamente."
+    printf "%s%s Faltan herramientas de diagnóstico: %s. Ejecuta con sudo para instalarlas.%s\n" "$C_YELLOW" "$WARN_ICON" "${missing_packages[*]}" "$C_RESET"
+    return
   fi
+
   if ! have apt-get; then
-    printf "%s%s Instalación automática solo soportada en Ubuntu/Debian con apt-get.%s\n" "$C_RED" "$BAD_ICON" "$C_RESET"
-    exit 1
+    add_info "Faltan herramientas de diagnóstico (${missing_packages[*]}), pero este sistema no tiene apt-get."
+    printf "%s%s Faltan herramientas de diagnóstico: %s. No hay apt-get disponible.%s\n" "$C_YELLOW" "$WARN_ICON" "${missing_packages[*]}" "$C_RESET"
+    return
   fi
 
-  dir="$(script_dir)"
-  installer="${dir}/install.sh"
-  if [[ ! -f "$installer" ]]; then
-    printf "%s%s No encuentro install.sh junto a plex-doctor.sh.%s\n" "$C_RED" "$BAD_ICON" "$C_RESET"
-    exit 1
+  printf "%s%s Instalando herramientas de diagnóstico faltantes: %s%s\n" "$C_YELLOW" "$WARN_ICON" "${missing_packages[*]}" "$C_RESET"
+  if apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_packages[@]}"; then
+    add_info "Se instalaron herramientas de diagnóstico faltantes: ${missing_packages[*]}."
+  else
+    add_problem "$WARN_ICON" "no se pudieron instalar herramientas de diagnóstico (${missing_packages[*]})"
+    add_recommendation "revisar apt-get e instalar dependencias de diagnóstico"
   fi
-
-  printf "%s%s Instalando dependencias opcionales antes del diagnóstico.%s\n" "$C_YELLOW" "$WARN_ICON" "$C_RESET"
-  bash "$installer"
 }
 
 add_problem() {
@@ -302,9 +322,10 @@ collect_system() {
   if have sensors; then
     temp_output="$(sensors 2>/dev/null || true)"
     printf "%s\n" "$temp_output"
+    printf "%s%s Nota: en sensors, high/crit son umbrales. Solo ALARM/CRITICAL/EMERGENCY cuenta como alerta.%s\n" "$C_DIM" "$INFO_ICON" "$C_RESET"
     if printf "%s\n" "$temp_output" | grep -Eiq 'ALARM|CRITICAL|EMERGENCY'; then
       SYSTEM_STATUS="${WARN_ICON} Temperatura con alerta"
-      add_problem "$WARN_ICON" "sensors muestra alerta térmica"
+      add_problem "$WARN_ICON" "sensors muestra alerta térmica real"
       add_recommendation "revisar temperatura y ventilación"
     fi
   else
@@ -682,7 +703,7 @@ collect_kernel() {
   section "6. Kernel / sistema"
 
   local kernel_alerts reboots
-  kernel_alerts="$(dmesg -T 2>/dev/null | grep -Ei 'out of memory|oom-killer|segfault|nvme.*error|ata[0-9].*error|thermal thrott|critical temperature|temperature above threshold|cpu clock throttled|package temperature|mce:.*hardware error|hardware error' | tail -n 160 || true)"
+  kernel_alerts="$(dmesg -T 2>/dev/null | grep -Ei 'out of memory|oom-killer|segfault|nvme.*error|ata[0-9].*error|thermal thrott|critical temperature|temperature above threshold|cpu clock throttled|package temperature above threshold|mce:.*hardware error|hardware error' | tail -n 160 || true)"
   printf "%s\n" "${kernel_alerts:-sin eventos críticos recientes en dmesg accesible}"
 
   if printf "%s\n" "$kernel_alerts" | grep -Eiq 'out of memory|oom-killer'; then
@@ -693,9 +714,9 @@ collect_kernel() {
   if printf "%s\n" "$kernel_alerts" | grep -Eiq 'segfault'; then
     add_problem "$WARN_ICON" "segfaults detectados"
   fi
-  if printf "%s\n" "$kernel_alerts" | grep -Eiq 'thermal thrott|critical temperature|temperature above threshold|cpu clock throttled|package temperature'; then
+  if printf "%s\n" "$kernel_alerts" | grep -Eiq 'thermal thrott|critical temperature|temperature above threshold|cpu clock throttled|package temperature above threshold'; then
     SYSTEM_STATUS="${WARN_ICON} Thermal throttling"
-    add_problem "$WARN_ICON" "posible thermal throttling detectado"
+    add_problem "$WARN_ICON" "thermal throttling real detectado en kernel"
     add_recommendation "revisar temperatura y ventilación"
   fi
 
@@ -709,7 +730,7 @@ collect_kernel() {
 
   if have journalctl; then
     subsection "Journal kernel últimas 24h"
-    journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep -Ei 'out of memory|oom-killer|segfault|nvme.*error|ata[0-9].*error|thermal thrott|critical temperature|temperature above threshold|cpu clock throttled|package temperature|hardware error' | tail -n 160 || true
+    journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep -Ei 'out of memory|oom-killer|segfault|nvme.*error|ata[0-9].*error|thermal thrott|critical temperature|temperature above threshold|cpu clock throttled|package temperature above threshold|hardware error' | tail -n 160 || true
   fi
 }
 
@@ -907,15 +928,16 @@ write_summary() {
 
 main() {
   parse_args "$@"
-  if (( INSTALL_OPTIONAL_DEPS == 1 )); then
-    install_optional_deps
-  fi
-
   printf "%sPLEX DOCTOR%s v%s\n" "${C_BOLD}${C_CYAN}" "${C_RESET}" "$VERSION"
-  printf "Modo: solo lectura. No modifica el sistema, no reinicia servicios, no borra archivos.\n"
+  if (( AUTO_INSTALL_DEPS == 1 )); then
+    printf "Modo: instala herramientas de diagnóstico si faltan. No reinicia servicios, no borra archivos.\n"
+  else
+    printf "Modo: solo lectura. No instala nada, no reinicia servicios, no borra archivos.\n"
+  fi
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     printf "%s%s Recomendado: ejecutar con sudo para leer todos los logs.%s\n" "$C_YELLOW" "$WARN_ICON" "$C_RESET"
   fi
+  install_missing_diagnostic_deps
 
   collect_system
   collect_plex

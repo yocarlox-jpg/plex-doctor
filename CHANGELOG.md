@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- El modo normal intenta instalar herramientas de diagnóstico faltantes con `apt-get`.
+- Añade `--no-install-deps`/`--read-only` para ejecutar sin instalar nada.
+- Instala solo lo que falte entre `smartmontools`, `sysstat`, `lm-sensors` y `ethtool`.
+- Aclara que `high`/`crit` de `sensors` son umbrales, no alertas por sí solos.
+- Endurece la detección de thermal throttling para evitar ruido térmico falso.
+
 ## 0.3.0
 
 - Añade bloque `EN CLARO` al inicio del resumen para separar problema principal, certeza y siguiente acción.

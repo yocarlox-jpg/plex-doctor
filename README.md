@@ -2,7 +2,7 @@
 
 `plex-doctor` es una herramienta Bash de diagnóstico para servidores baremetal Plex en Ubuntu/Debian.
 
-Está pensada para revisar problemas típicos de Plex, rclone/FUSE, discos, kernel y red sin modificar nada del sistema.
+Está pensada para revisar problemas típicos de Plex, rclone/FUSE, discos, kernel y red en servidores baremetal.
 
 ## Uso
 
@@ -16,21 +16,26 @@ Para comprobar qué versión tienes:
 bash plex-doctor.sh --version
 ```
 
-El script es de solo lectura:
+Durante el diagnóstico:
 
 - no reinicia servicios
 - no borra archivos
 - no desmonta mounts
 - no cambia configuración
-- no instala nada
+- no toca Plex, rclone, discos ni mounts
 
-Si quieres instalar las dependencias opcionales antes del diagnóstico, usa el modo explícito:
+En modo normal puede instalar herramientas estándar de diagnóstico si faltan:
+
+- `smartmontools` para SMART
+- `sysstat` para `iostat`
+- `lm-sensors` para temperatura
+- `ethtool` para velocidad de interfaz
+
+Si quieres forzar modo totalmente solo lectura, sin instalar nada:
 
 ```bash
-sudo bash plex-doctor.sh --install-deps
+sudo bash plex-doctor.sh --no-install-deps
 ```
-
-Ese modo sí modifica el sistema porque ejecuta el instalador de dependencias opcionales.
 
 Al terminar muestra un resumen fácil de copiar y pegar en ChatGPT, y además guarda:
 
@@ -49,15 +54,17 @@ El resumen incluye:
 - plan de actuación recomendado
 - comandos recomendados
 
-## Instalación de dependencias opcionales
+## Dependencias de diagnóstico
 
-El script funciona sin dependencias raras, pero puede dar más información si instalas herramientas estándar.
+El script funciona sin dependencias raras, pero da más información con herramientas estándar. En modo normal intenta instalar solo las que falten usando `apt-get`.
+
+También puedes instalarlas manualmente:
 
 ```bash
 sudo bash install.sh
 ```
 
-También puedes hacerlo desde el propio doctor:
+O pedirlo explícitamente desde el propio doctor:
 
 ```bash
 sudo bash plex-doctor.sh --install-deps
@@ -85,6 +92,7 @@ El instalador usa `apt-get` e instala:
 - procesos con más CPU
 - procesos con más RAM
 - temperatura si existe `sensors`
+- no trata `high`/`crit` de `sensors` como fallo por sí solo; son umbrales. Solo alerta con `ALARM`, `CRITICAL`, `EMERGENCY` o throttling real del kernel.
 
 ### Plex
 
