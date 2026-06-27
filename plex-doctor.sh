@@ -2,9 +2,10 @@
 
 set -uo pipefail
 
-VERSION="0.1.2"
+VERSION="0.1.3"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
+INSTALL_OPTIONAL_DEPS=0
 
 if [[ -t 1 ]]; then
   C_RESET=$'\033[0m'
@@ -46,6 +47,41 @@ TRANSCODER_STATUS="${OK_ICON} Sin procesos activos"
 RCLONE_STATUS="${OK_ICON} OK"
 NETWORK_STATUS="${OK_ICON} OK"
 
+usage() {
+  cat <<EOF
+Uso:
+  sudo bash plex-doctor.sh
+  sudo bash plex-doctor.sh --install-deps
+
+Opciones:
+  --install-deps           Instala dependencias opcionales con apt-get antes del diagnóstico.
+  --install-optional-deps  Alias de --install-deps.
+  -h, --help               Muestra esta ayuda.
+
+Modo normal: solo lectura, no modifica el sistema.
+EOF
+}
+
+parse_args() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --install-deps|--install-optional-deps)
+        INSTALL_OPTIONAL_DEPS=1
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        printf "%sOpción desconocida: %s%s\n" "$C_RED" "$arg" "$C_RESET" >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+  done
+}
+
 section() {
   printf "\n%s%s%s\n" "${C_BOLD}${C_CYAN}" "$1" "${C_RESET}"
   printf "%s\n" "────────────────────────────────────"
@@ -64,6 +100,39 @@ run_cmd() {
 
 have() {
   command -v "$1" >/dev/null 2>&1
+}
+
+script_dir() {
+  cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd
+}
+
+install_optional_deps() {
+  local dir installer
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    printf "%s%s Para instalar dependencias opcionales ejecuta con sudo.%s\n" "$C_RED" "$BAD_ICON" "$C_RESET"
+    exit 1
+  fi
+  if ! have apt-get; then
+    printf "%s%s Instalación automática solo soportada en Ubuntu/Debian con apt-get.%s\n" "$C_RED" "$BAD_ICON" "$C_RESET"
+    exit 1
+  fi
+
+  dir="$(script_dir)"
+  installer="${dir}/install.sh"
+  if [[ ! -f "$installer" ]]; then
+    printf "%s%s No encuentro install.sh junto a plex-doctor.sh.%s\n" "$C_RED" "$BAD_ICON" "$C_RESET"
+    exit 1
+  fi
+
+  printf "%s%s Instalando dependencias opcionales antes del diagnóstico.%s\n" "$C_YELLOW" "$WARN_ICON" "$C_RESET"
+  bash "$installer"
+}
+
+show_dependency_hint() {
+  if ! have sqlite3; then
+    printf "%s%s Recomendado: sqlite3 no está instalado; sin él no puedo hacer PRAGMA quick_check de la DB de Plex.%s\n" "$C_YELLOW" "$WARN_ICON" "$C_RESET"
+    printf "%s   Para instalar dependencias opcionales: sudo bash plex-doctor.sh --install-deps%s\n" "$C_DIM" "$C_RESET"
+  fi
 }
 
 add_problem() {
@@ -651,11 +720,17 @@ write_summary() {
 }
 
 main() {
+  parse_args "$@"
+  if (( INSTALL_OPTIONAL_DEPS == 1 )); then
+    install_optional_deps
+  fi
+
   printf "%sPLEX DOCTOR%s v%s\n" "${C_BOLD}${C_CYAN}" "${C_RESET}" "$VERSION"
   printf "Modo: solo lectura. No modifica el sistema, no reinicia servicios, no borra archivos.\n"
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     printf "%s%s Recomendado: ejecutar con sudo para leer todos los logs.%s\n" "$C_YELLOW" "$WARN_ICON" "$C_RESET"
   fi
+  show_dependency_hint
 
   collect_system
   collect_plex

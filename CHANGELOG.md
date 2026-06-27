@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3
+
+- Añade aviso inicial cuando falta `sqlite3`.
+- Añade `sudo bash plex-doctor.sh --install-deps` para instalar dependencias opcionales de forma explícita antes del diagnóstico.
+- Mantiene el modo normal como solo lectura.
+
 ## 0.1.2
 
 - Añade fallback de `lsblk` compatible con Ubuntu 20.04.

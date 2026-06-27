@@ -18,6 +18,14 @@ El script es de solo lectura:
 - no cambia configuración
 - no instala nada
 
+Si quieres instalar las dependencias opcionales antes del diagnóstico, usa el modo explícito:
+
+```bash
+sudo bash plex-doctor.sh --install-deps
+```
+
+Ese modo sí modifica el sistema porque ejecuta el instalador de dependencias opcionales.
+
 Al terminar muestra un resumen fácil de copiar y pegar en ChatGPT, y además guarda:
 
 ```text
@@ -27,10 +35,16 @@ Al terminar muestra un resumen fácil de copiar y pegar en ChatGPT, y además gu
 
 ## Instalación de dependencias opcionales
 
-El script funciona sin dependencias raras, pero puede dar más información si instalas herramientas estándar:
+El script funciona sin dependencias raras, pero puede dar más información si instalas herramientas estándar. `sqlite3` es especialmente recomendable porque permite comprobar la base de datos de Plex con `PRAGMA quick_check`.
 
 ```bash
 sudo bash install.sh
+```
+
+También puedes hacerlo desde el propio doctor:
+
+```bash
+sudo bash plex-doctor.sh --install-deps
 ```
 
 El instalador usa `apt-get` e instala:
