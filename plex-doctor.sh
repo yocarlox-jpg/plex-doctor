@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="0.1.0"
+VERSION="0.1.1"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
 
@@ -124,7 +124,7 @@ collect_system() {
   print_kv "Swap" "${swap:-desconocido}"
 
   load1="$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)"
-  load_per_cpu="$(awk -v load="$load1" -v cpu="$cpu_count" 'BEGIN { if (cpu < 1) cpu=1; printf "%.2f", load / cpu }')"
+  load_per_cpu="$(awk -v avg_load="$load1" -v cpu="$cpu_count" 'BEGIN { if (cpu < 1) cpu=1; printf "%.2f", avg_load / cpu }')"
   if awk -v ratio="$load_per_cpu" 'BEGIN { exit !(ratio >= 1.50) }'; then
     CPU_STATUS="${BAD_ICON} Load muy alto"
     add_problem "$BAD_ICON" "Load average alto para esta CPU (${load1} con ${cpu_count} cores)"
@@ -156,10 +156,10 @@ collect_system() {
   fi
 
   subsection "Procesos con más CPU"
-  run_cmd "top CPU" ps -eo pid,ppid,user,comm,%cpu,%mem --sort=-%cpu
+  ps -eo pid,ppid,user,comm,%cpu,%mem --sort=-%cpu 2>&1 | head -n 21
 
   subsection "Procesos con más RAM"
-  run_cmd "top RAM" ps -eo pid,ppid,user,comm,%cpu,%mem --sort=-%mem
+  ps -eo pid,ppid,user,comm,%cpu,%mem --sort=-%mem 2>&1 | head -n 21
 
   subsection "Temperatura"
   if have sensors; then
@@ -207,7 +207,7 @@ collect_plex() {
   fi
 
   subsection "Procesos Plex"
-  ps -eo pid,ppid,user,comm,args,%cpu,%mem --sort=-%cpu 2>/dev/null | grep -i '[P]lex' || true
+  ps -eo pid,ppid,user,comm,args,%cpu,%mem --sort=-%cpu 2>/dev/null | grep -i '[P]lex' | head -n 30 || true
 
   transcoder_count="$(pgrep -fc 'Plex Transcoder' 2>/dev/null || echo 0)"
   print_kv "Plex Transcoder activos" "$transcoder_count"
@@ -368,7 +368,7 @@ collect_rclone() {
   local rclone_count mounts broken duplicate_cmds mountpoint elapsed_ms start_ms end_ms slow_mounts mount_list
 
   subsection "Procesos rclone"
-  ps -eo pid,ppid,user,comm,args,%cpu,%mem --sort=-%cpu 2>/dev/null | grep -i '[r]clone' || true
+  ps -eo pid,ppid,user,comm,args,%cpu,%mem --sort=-%cpu 2>/dev/null | grep -i '[r]clone' | head -n 30 || true
   rclone_count="$(pgrep -fc rclone 2>/dev/null || echo 0)"
   print_kv "Procesos rclone" "$rclone_count"
 
@@ -486,7 +486,7 @@ collect_network() {
 
   subsection "Conexiones activas al puerto 32400"
   if have ss; then
-    ss -tnp 2>/dev/null | awk 'NR==1 || /:32400/'
+    ss -tnp 2>/dev/null | awk 'NR==1 || /:32400/' | head -n 81
     conn_count="$(ss -tn 2>/dev/null | grep -c ':32400' || true)"
     print_kv "Conexiones 32400" "$conn_count"
   fi
@@ -513,7 +513,7 @@ collect_kernel() {
   section "6. Kernel / sistema"
 
   local kernel_alerts reboots
-  kernel_alerts="$(dmesg -T 2>/dev/null | grep -Ei 'out of memory|oom-killer|segfault|nvme.*error|ata[0-9].*error|thermal|throttl|mce|hardware error' | tail -n 160 || true)"
+  kernel_alerts="$(dmesg -T 2>/dev/null | grep -Ei 'out of memory|oom-killer|segfault|nvme.*error|ata[0-9].*error|thermal thrott|critical temperature|temperature above threshold|cpu clock throttled|package temperature|mce:.*hardware error|hardware error' | tail -n 160 || true)"
   printf "%s\n" "${kernel_alerts:-sin eventos críticos recientes en dmesg accesible}"
 
   if printf "%s\n" "$kernel_alerts" | grep -Eiq 'out of memory|oom-killer'; then
@@ -524,7 +524,7 @@ collect_kernel() {
   if printf "%s\n" "$kernel_alerts" | grep -Eiq 'segfault'; then
     add_problem "$WARN_ICON" "segfaults detectados"
   fi
-  if printf "%s\n" "$kernel_alerts" | grep -Eiq 'thermal|throttl'; then
+  if printf "%s\n" "$kernel_alerts" | grep -Eiq 'thermal thrott|critical temperature|temperature above threshold|cpu clock throttled|package temperature'; then
     SYSTEM_STATUS="${WARN_ICON} Thermal throttling"
     add_problem "$WARN_ICON" "posible thermal throttling detectado"
     add_recommendation "revisar temperatura y ventilación"
@@ -540,7 +540,7 @@ collect_kernel() {
 
   if have journalctl; then
     subsection "Journal kernel últimas 24h"
-    journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep -Ei 'out of memory|oom-killer|segfault|nvme.*error|ata[0-9].*error|thermal|throttl' | tail -n 160 || true
+    journalctl -k --since "24 hours ago" --no-pager 2>/dev/null | grep -Ei 'out of memory|oom-killer|segfault|nvme.*error|ata[0-9].*error|thermal thrott|critical temperature|temperature above threshold|cpu clock throttled|package temperature|hardware error' | tail -n 160 || true
   fi
 }
 

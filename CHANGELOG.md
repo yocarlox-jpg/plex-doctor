@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Corrige compatibilidad con `gawk` en Ubuntu 20.04 evitando usar `load` como variable interna.
+- Limita listados largos de procesos y conexiones para que la salida sea más manejable.
+- Reduce falsos positivos de thermal throttling en líneas normales de arranque del kernel.
+
 ## 0.1.0
 
 - Primera versión de `plex-doctor`.
