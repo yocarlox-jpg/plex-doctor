@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Añade bloque `EN CLARO` al inicio del resumen para separar problema principal, certeza y siguiente acción.
+- Aclara si un fallo de disco/SMART/I/O es real o si simplemente no se pudo comprobar.
+- Agrupa errores repetidos de Plex por patrones para reducir ruido en pantalla.
+- Mejora la causa probable cuando el problema apunta a disco, cable, backplane, puerto SATA o controladora.
+
 ## 0.2.3
 
 - Elimina `sqlite3` de las dependencias recomendadas e instaladas.

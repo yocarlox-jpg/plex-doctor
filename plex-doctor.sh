@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="0.2.3"
+VERSION="0.3.0"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
 INSTALL_OPTIONAL_DEPS=0
@@ -161,6 +161,42 @@ add_recommendation() {
     [[ "$existing" == "$recommendation" ]] && return
   done
   RECOMMENDATIONS+=("$recommendation")
+}
+
+count_text_matches() {
+  local text="$1"
+  local pattern="$2"
+  printf "%s\n" "$text" | grep -Eic "$pattern" 2>/dev/null || true
+}
+
+print_plex_error_summary() {
+  local errors="$1"
+  local client_profile h264 transcode_dead db_errors eae_errors
+
+  if [[ -z "$errors" ]]; then
+    printf "\nResumen de errores Plex:\n%s\n" "sin errores recientes encontrados"
+    return
+  fi
+
+  client_profile="$(count_text_matches "$errors" 'Unable to find client profile|ClientProfileExtra')"
+  h264="$(count_text_matches "$errors" 'non-existing PPS|decode_slice_header|no frame|invalid NAL|error while decoding|h264')"
+  transcode_dead="$(count_text_matches "$errors" 'Session appears to have died|TranscodeOutputStream')"
+  db_errors="$(count_text_matches "$errors" 'database is locked|corrupt|malformed|busy DB')"
+  eae_errors="$(count_text_matches "$errors" 'Error iterating EAE watchfolder|EasyAudioEncoder|EAE')"
+
+  printf "\nResumen de errores Plex:\n"
+  (( db_errors > 0 )) && printf -- "- %s posibles errores de DB. Revisar solo si coinciden con cortes o corrupción.\n" "$db_errors"
+  (( eae_errors > 0 )) && printf -- "- %s errores EAE/transcode. Suelen venir de audio/subtítulos/transcodificación.\n" "$eae_errors"
+  (( h264 > 0 )) && printf -- "- %s errores H264/decode. Normalmente apuntan a un vídeo/stream/cliente concreto, no a Plex entero.\n" "$h264"
+  (( transcode_dead > 0 )) && printf -- "- %s sesiones de transcode caídas. Puede ser normal si el cliente cerró reproducción.\n" "$transcode_dead"
+  (( client_profile > 0 )) && printf -- "- %s errores de perfil cliente. Suele ser ruido de una app/TV concreta.\n" "$client_profile"
+
+  if (( db_errors + eae_errors + h264 + transcode_dead + client_profile == 0 )); then
+    printf -- "- Hay errores en logs, pero no coinciden con patrones frecuentes clasificados.\n"
+  fi
+
+  printf "\nÚltimas líneas crudas, máximo 12:\n"
+  printf "%s\n" "$errors" | tail -n 12
 }
 
 safe_timeout() {
@@ -356,8 +392,8 @@ collect_plex() {
   print_kv "Ubicación esperada" "$log_dir"
   if [[ -d "$log_dir" ]]; then
     find "$log_dir" -maxdepth 1 -type f -name '*.log' -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort | tail -n 10 || true
-    plex_errors="$(grep -RihE 'error|critical|exception|database is locked|corrupt' "$log_dir"/*.log 2>/dev/null | tail -n 80 || true)"
-    printf "\nÚltimos errores relevantes:\n%s\n" "${plex_errors:-sin errores recientes encontrados}"
+    plex_errors="$(grep -RihE 'error|critical|exception|database is locked|corrupt|decode_slice_header|non-existing PPS|no frame' "$log_dir"/*.log 2>/dev/null | tail -n 80 || true)"
+    print_plex_error_summary "$plex_errors"
     if printf "%s\n" "$plex_errors" | grep -Eiq 'database is locked|corrupt|malformed'; then
       PLEX_DB_STATUS="${BAD_ICON} Errores en logs"
       add_problem "$BAD_ICON" "logs de Plex muestran posibles errores de base de datos"
@@ -369,6 +405,9 @@ collect_plex() {
     fi
     if printf "%s\n" "$plex_errors" | grep -Eiq 'Unable to find client profile'; then
       add_info "Plex repite errores de perfil de cliente no encontrado; normalmente es ruido de app/TV salvo cortes en ese cliente."
+    fi
+    if printf "%s\n" "$plex_errors" | grep -Eiq 'non-existing PPS|decode_slice_header|no frame|invalid NAL|error while decoding'; then
+      add_info "Plex muestra errores H264/decode; normalmente apuntan a un archivo, stream o cliente concreto, no a un fallo global del servidor."
     fi
     if printf "%s\n" "$plex_errors" | grep -Eiq 'Sleeping for .*busy DB|database is locked'; then
       add_problem "$WARN_ICON" "Plex detecta DB ocupada/bloqueada temporalmente"
@@ -388,7 +427,6 @@ collect_plex() {
     db_size="$(du -h "$db_file" 2>/dev/null | awk '{print $1}')"
     print_kv "Tamaño DB" "${db_size:-desconocido}"
     PLEX_DB_STATUS="${OK_ICON} Tamaño leído"
-    add_info "No se ejecuta quick_check externo sobre la DB de Plex; se usan logs reales para detectar corrupción/bloqueos."
   else
     PLEX_DB_STATUS="${WARN_ICON} DB no encontrada"
     add_problem "$WARN_ICON" "no se encontró la DB de Plex en la ruta estándar"
@@ -679,7 +717,9 @@ probable_cause() {
   local joined
   joined="$(printf "%s\n" "${PROBLEMS[@]:-}")"
 
-  if printf "%s\n" "$joined" | grep -Eiq 'mount|rclone|I/O wait|I/O'; then
+  if printf "%s\n" "$joined" | grep -Eiq 'SMART alerta|errores I/O'; then
+    echo "El síntoma principal apunta a almacenamiento físico o enlace SATA: disco, cable, backplane, puerto o controladora."
+  elif printf "%s\n" "$joined" | grep -Eiq 'mount|rclone|I/O wait'; then
     echo "El servidor parece inestable por problema de mount/rclone o I/O, no por Plex directamente."
   elif printf "%s\n" "$joined" | grep -Eiq 'errores de base de datos|integridad de la DB'; then
     echo "El síntoma principal apunta a la base de datos de Plex o a errores internos de Plex."
@@ -696,6 +736,45 @@ probable_cause() {
   fi
 }
 
+write_plain_diagnosis() {
+  local joined score_reason
+  joined="$(printf "%s\n" "${PROBLEMS[@]:-}")"
+  score_reason="No hay penalizaciones importantes."
+
+  echo "EN CLARO:"
+
+  if printf "%s\n" "$joined" | grep -Eiq 'SMART alerta|errores I/O'; then
+    echo "- Problema principal: almacenamiento/disco/SATA."
+    echo "- ¿Es real?: sí. SMART o el kernel han devuelto errores reales; no es que Plex Doctor no pueda comprobarlo."
+    echo "- Qué NO parece culpable: Plex, la DB de Plex, rclone o DNS no son la causa principal según esta ejecución."
+    echo "- Qué hacer ahora: priorizar backup/migración de datos y revisar disco, cable SATA, backplane, puerto o controladora."
+    score_reason="Baja sobre todo por alertas rojas de SMART/I/O."
+  elif printf "%s\n" "$joined" | grep -Eiq 'mount roto|no responde correctamente|rclone'; then
+    echo "- Problema principal: mount/rclone/FUSE."
+    echo "- ¿Es real?: sí, alguna ruta montada no responde o responde mal."
+    echo "- Qué NO parece culpable: Plex puede quedarse esperando datos, pero no tiene por qué ser el origen."
+    echo "- Qué hacer ahora: revisar logs de rclone, estado del remote y estabilidad del mount afectado."
+    score_reason="Baja sobre todo por mount/rclone."
+  elif printf "%s\n" "$joined" | grep -Eiq 'Transcoder activo|transcodificación'; then
+    echo "- Problema principal: carga por transcodificación."
+    echo "- ¿Es real?: sí, hay procesos Plex Transcoder activos; puede ser normal si hay usuarios viendo contenido."
+    echo "- Qué NO parece culpable: no hay señal fuerte de fallo global si discos, rclone, RAM y red están OK."
+    echo "- Qué hacer ahora: identificar qué usuario/dispositivo fuerza transcode y revisar subtítulos, audio y calidad remota."
+    score_reason="Baja por avisos de transcodificación, no por fallo crítico."
+  elif ((${#PROBLEMS[@]} == 0)); then
+    echo "- Problema principal: no hay fallo claro en esta ejecución."
+    echo "- ¿Es real?: si hay cortes, probablemente son intermitentes o externos al momento de la prueba."
+    echo "- Qué hacer ahora: repetir Plex Doctor cuando el problema esté ocurriendo."
+  else
+    echo "- Problema principal: hay avisos mezclados; mirar primero los rojos."
+    echo "- ¿Es real?: los rojos son señales accionables; los amarillos son contexto o carga."
+    echo "- Qué hacer ahora: resolver primero el primer problema rojo del listado."
+    score_reason="Baja por problemas rojos/amarillos detectados."
+  fi
+
+  echo "- Puntuación: ${HEALTH_SCORE}/100. ${score_reason}"
+}
+
 write_interpretation() {
   local joined
   joined="$(printf "%s\n" "${PROBLEMS[@]:-}")"
@@ -706,14 +785,16 @@ write_interpretation() {
     return
   fi
 
-  if printf "%s\n" "$joined" | grep -Eiq 'mount roto|no responde correctamente|rclone|I/O wait|errores I/O'; then
+  if printf "%s\n" "$joined" | grep -Eiq 'SMART alerta|errores I/O'; then
+    echo "- Prioridad alta: almacenamiento físico o enlace SATA. SMART/I/O no es ruido de Plex; puede ser disco, cable, backplane, puerto o controladora."
+  elif printf "%s\n" "$joined" | grep -Eiq 'mount roto|no responde correctamente|rclone|I/O wait'; then
     echo "- Prioridad alta: almacenamiento/mounts. Si rclone, FUSE o el disco se bloquean, Plex puede parecer culpable aunque solo esté esperando datos."
   fi
   if printf "%s\n" "$joined" | grep -Eiq 'Transcoder activo|transcodificación'; then
     echo "- Hay transcodificación activa. Esto puede explicar load alto, CPU alta y errores EAE, sobre todo con subtítulos quemados, audio EAC3/DTS o clientes poco compatibles."
   fi
   if printf "%s\n" "$joined" | grep -Eiq 'DB ocupada|DB.*bloqueada|base de datos'; then
-    echo "- La DB de Plex merece revisión solo porque hay señales reales en logs; no se usa sqlite3 externo como prueba de salud."
+    echo "- La DB de Plex merece revisión solo porque hay señales reales en logs; Plex Doctor no la toca ni la modifica."
   fi
   if printf "%s\n" "$joined" | grep -Eiq 'perfil de cliente'; then
     echo "- Los errores de perfil de cliente suelen venir de TVs/apps concretas. Normalmente no tiran Plex, pero pueden forzar transcodificación o provocar reproducción irregular."
@@ -737,9 +818,11 @@ write_action_plan() {
   joined="$(printf "%s\n" "${PROBLEMS[@]:-}")"
 
   echo "Plan de actuación recomendado:"
-  echo "1. Confirmar versión y dependencias opcionales: bash plex-doctor.sh --version; sudo bash plex-doctor.sh --install-deps."
+  echo "1. Confirmar versión: bash plex-doctor.sh --version."
 
-  if printf "%s\n" "$joined" | grep -Eiq 'mount roto|no responde correctamente|rclone|I/O wait|errores I/O'; then
+  if printf "%s\n" "$joined" | grep -Eiq 'SMART alerta|errores I/O'; then
+    echo "2. Tratar almacenamiento como prioridad: backup, revisar SMART completo y comprobar cable/backplane/puerto antes de culpar a Plex."
+  elif printf "%s\n" "$joined" | grep -Eiq 'mount roto|no responde correctamente|rclone|I/O wait'; then
     echo "2. Revisar almacenamiento antes que Plex: comprobar que los mounts rclone responden, mirar logs de rclone y confirmar que el disco/cache no está saturado."
   elif printf "%s\n" "$joined" | grep -Eiq 'Transcoder activo|transcodificación'; then
     echo "2. Revisar sesiones activas en Plex: identificar usuarios/dispositivos que transcodifican, subtítulos quemados y audios que obligan a convertir."
@@ -774,6 +857,8 @@ write_summary() {
     echo "Servidor: $(hostname 2>/dev/null || echo desconocido)"
     echo "Fecha: $(date -Is 2>/dev/null || date)"
     echo "Versión: ${VERSION}"
+    echo
+    write_plain_diagnosis
     echo
     printf "%-20s %s\n" "Sistema ............" "$SYSTEM_STATUS"
     printf "%-20s %s\n" "CPU ................" "$CPU_STATUS"

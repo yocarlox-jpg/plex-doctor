@@ -41,6 +41,7 @@ Al terminar muestra un resumen fácil de copiar y pegar en ChatGPT, y además gu
 
 El resumen incluye:
 
+- bloque `EN CLARO` con diagnóstico directo
 - estado por área
 - problemas detectados
 - causa probable
@@ -93,10 +94,10 @@ El instalador usa `apt-get` e instala:
 - procesos activos de `Plex Transcoder`
 - puerto `32400`
 - ubicación de logs
-- últimos errores relevantes en logs Plex
+- resumen de errores relevantes en logs Plex, agrupado por patrones
 - interpretación de errores comunes de Plex
 - tamaño de la base de datos
-- no ejecuta `sqlite3` sobre la DB; usa tamaño y logs reales para detectar señales de corrupción o bloqueo
+- no toca ni modifica la DB; usa tamaño y logs reales para detectar señales de corrupción o bloqueo
 
 ### Discos
 

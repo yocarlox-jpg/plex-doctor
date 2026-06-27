@@ -4,46 +4,55 @@ PLEX DOCTOR - RESUMEN
 
 Servidor: plex-server
 Fecha: 2026-06-27T12:34:56+02:00
-Versión: 0.2.3
+Versión: 0.3.0
+
+EN CLARO:
+- Problema principal: almacenamiento/disco/SATA.
+- ¿Es real?: sí. SMART o el kernel han devuelto errores reales; no es que Plex Doctor no pueda comprobarlo.
+- Qué NO parece culpable: Plex, la DB de Plex, rclone o DNS no son la causa principal según esta ejecución.
+- Qué hacer ahora: priorizar backup/migración de datos y revisar disco, cable SATA, backplane, puerto o controladora.
+- Puntuación: 60/100. Baja sobre todo por alertas rojas de SMART/I/O.
 
 Sistema ............ 🟢 OK
-CPU ................ 🟡 Load alto
+CPU ................ 🟢 OK
 RAM ................ 🟢 OK
-Discos ............. 🔴 I/O wait alto
+Discos ............. 🔴 Errores I/O
 Plex ............... 🟢 Running
-DB Plex ............ 🟢 OK
+DB Plex ............ 🟢 Tamaño leído
 Transcoder ......... 🟡 5 procesos activos
-rclone ............. 🔴 mount roto detectado
+rclone ............. 🟢 OK
 Red ................ 🟢 OK
 
 Problemas detectados:
-🔴 /mnt/01.PEL no responde correctamente
-🟡 Load average alto para esta CPU (12.40 con 8 cores)
 🟡 Plex Transcoder activo con varios procesos (5)
+🔴 SMART alerta en /dev/sda
+🔴 SMART alerta en /dev/sdb
+🔴 errores I/O detectados en dmesg
 
 Notas informativas:
-ℹ️ No se ejecuta quick_check externo sobre la DB de Plex; se usan logs reales para detectar corrupción/bloqueos.
+ℹ️ Plex muestra errores H264/decode; normalmente apuntan a un archivo, stream o cliente concreto, no a un fallo global del servidor.
 
 Causa probable:
-El servidor parece inestable por problema de mount/rclone o I/O, no por Plex directamente.
+El síntoma principal apunta a almacenamiento físico o enlace SATA: disco, cable, backplane, puerto o controladora.
 
 Interpretación:
-- Prioridad alta: almacenamiento/mounts. Si rclone, FUSE o el disco se bloquean, Plex puede parecer culpable aunque solo esté esperando datos.
+- Prioridad alta: almacenamiento físico o enlace SATA. SMART/I/O no es ruido de Plex; puede ser disco, cable, backplane, puerto o controladora.
 - Hay transcodificación activa. Esto puede explicar load alto, CPU alta y errores EAE, sobre todo con subtítulos quemados, audio EAC3/DTS o clientes poco compatibles.
 
 Plan de actuación recomendado:
-1. Confirmar versión y dependencias opcionales: bash plex-doctor.sh --version; sudo bash plex-doctor.sh --install-deps.
-2. Revisar almacenamiento antes que Plex: comprobar que los mounts rclone responden, mirar logs de rclone y confirmar que el disco/cache no está saturado.
+1. Confirmar versión: bash plex-doctor.sh --version.
+2. Tratar almacenamiento como prioridad: backup, revisar SMART completo y comprobar cable/backplane/puerto antes de culpar a Plex.
 3. Guardar /tmp/plex-doctor-full.log y comparar con una segunda ejecución cuando el problema esté ocurriendo.
 4. Evitar cambios destructivos hasta identificar causa: no borrar DB/cache ni desmontar rutas sin backup o ventana de mantenimiento.
 
 Comandos recomendados:
-- revisar mount roto
-- revisar logs rclone
-- revisar disco/cache y mounts rclone
 - revisar transcodificaciones activas
+- hacer backup o migrar datos de /dev/sda cuanto antes
+- revisar SMART completo y estado físico del disco
+- hacer backup o migrar datos de /dev/sdb cuanto antes
+- revisar errores NVMe/SATA y salud de discos
 
-Puntuación salud: 72/100
+Puntuación salud: 60/100
 
 Logs guardados:
 - /tmp/plex-doctor-summary.txt
