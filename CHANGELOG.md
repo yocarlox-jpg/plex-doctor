@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Añade sección `Interpretación` en el resumen final con explicación de las señales detectadas.
+- Añade `Plan de actuación recomendado` con pasos priorizados y prudentes.
+- Detecta patrones frecuentes en logs de Plex: EAE/watchfolder, perfiles de cliente, DB ocupada y sesiones de transcodificación caídas.
+- Mantiene el script sin reparaciones automáticas en modo diagnóstico.
+
 ## 0.1.4
 
 - Añade `--version` para comprobar rápidamente qué versión está instalada en el servidor.

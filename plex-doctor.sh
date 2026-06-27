@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="0.1.4"
+VERSION="0.2.0"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
 INSTALL_OPTIONAL_DEPS=0
@@ -353,6 +353,22 @@ collect_plex() {
       add_problem "$BAD_ICON" "logs de Plex muestran posibles errores de base de datos"
       add_recommendation "revisar base de datos de Plex y backups"
     fi
+    if printf "%s\n" "$plex_errors" | grep -Eiq 'Error iterating EAE watchfolder'; then
+      add_problem "$WARN_ICON" "Plex EAE/transcodificación muestra errores de watchfolder"
+      add_recommendation "revisar sesiones de transcodificación y permisos/cache de Transcode"
+    fi
+    if printf "%s\n" "$plex_errors" | grep -Eiq 'Unable to find client profile'; then
+      add_problem "$WARN_ICON" "Plex repite errores de perfil de cliente no encontrado"
+      add_recommendation "identificar cliente/dispositivo que fuerza transcodificación o perfil no reconocido"
+    fi
+    if printf "%s\n" "$plex_errors" | grep -Eiq 'Sleeping for .*busy DB|database is locked'; then
+      add_problem "$WARN_ICON" "Plex detecta DB ocupada/bloqueada temporalmente"
+      add_recommendation "comprobar DB con sqlite3 y revisar tareas pesadas de librería"
+    fi
+    if printf "%s\n" "$plex_errors" | grep -Eiq 'Session appears to have died|TranscodeOutputStream'; then
+      add_problem "$WARN_ICON" "sesiones de transcodificación parecen morir durante reproducción"
+      add_recommendation "revisar clientes afectados, subtítulos y carga de transcodificación"
+    fi
   else
     printf "%s%s no existe o no es accesible%s\n" "$C_YELLOW" "$log_dir" "$C_RESET"
   fi
@@ -679,6 +695,68 @@ probable_cause() {
   fi
 }
 
+write_interpretation() {
+  local joined
+  joined="$(printf "%s\n" "${PROBLEMS[@]:-}")"
+
+  echo "Interpretación:"
+  if ((${#PROBLEMS[@]} == 0)); then
+    echo "- No hay una señal clara de fallo. Si hay cortes, pueden ser intermitentes o externos al servidor."
+    return
+  fi
+
+  if printf "%s\n" "$joined" | grep -Eiq 'mount roto|no responde correctamente|rclone|I/O wait|errores I/O'; then
+    echo "- Prioridad alta: almacenamiento/mounts. Si rclone, FUSE o el disco se bloquean, Plex puede parecer culpable aunque solo esté esperando datos."
+  fi
+  if printf "%s\n" "$joined" | grep -Eiq 'Transcoder activo|transcodificación'; then
+    echo "- Hay transcodificación activa. Esto puede explicar load alto, CPU alta y errores EAE, sobre todo con subtítulos quemados, audio EAC3/DTS o clientes poco compatibles."
+  fi
+  if printf "%s\n" "$joined" | grep -Eiq 'DB ocupada|DB.*bloqueada|quick_check|base de datos|sqlite3'; then
+    echo "- La DB de Plex merece revisión. Si solo falta sqlite3, no significa corrupción; significa que todavía no se pudo verificar."
+  fi
+  if printf "%s\n" "$joined" | grep -Eiq 'perfil de cliente'; then
+    echo "- Los errores de perfil de cliente suelen venir de TVs/apps concretas. Normalmente no tiran Plex, pero pueden forzar transcodificación o provocar reproducción irregular."
+  fi
+  if printf "%s\n" "$joined" | grep -Eiq 'timeout/fallo de parada|SIGKILL|failed'; then
+    echo "- Plex tuvo problemas al parar/arrancar recientemente. Eso puede dejar sesiones, cache o procesos en estado raro aunque ahora el servicio aparezca running."
+  fi
+  if printf "%s\n" "$joined" | grep -Eiq 'RAM|Swap|OOM'; then
+    echo "- Hay presión de memoria. Si aparece OOM killer, cualquier síntoma posterior de Plex puede ser consecuencia de falta de RAM."
+  fi
+  if printf "%s\n" "$joined" | grep -Eiq 'Gateway|DNS|internet|32400'; then
+    echo "- Hay señales de red o puerto 32400. Si la red falla, el servidor puede estar sano pero inaccesible para clientes externos."
+  fi
+  if printf "%s\n" "$joined" | grep -Eiq 'thermal|Temperatura'; then
+    echo "- Hay señal térmica. Si el equipo reduce frecuencia por temperatura, Plex transcodificando será lo primero que se degrade."
+  fi
+}
+
+write_action_plan() {
+  local joined
+  joined="$(printf "%s\n" "${PROBLEMS[@]:-}")"
+
+  echo "Plan de actuación recomendado:"
+  echo "1. Confirmar versión y dependencias: bash plex-doctor.sh --version; si falta sqlite3, usar sudo bash plex-doctor.sh --install-deps."
+
+  if printf "%s\n" "$joined" | grep -Eiq 'mount roto|no responde correctamente|rclone|I/O wait|errores I/O'; then
+    echo "2. Revisar almacenamiento antes que Plex: comprobar que los mounts rclone responden, mirar logs de rclone y confirmar que el disco/cache no está saturado."
+  elif printf "%s\n" "$joined" | grep -Eiq 'Transcoder activo|transcodificación'; then
+    echo "2. Revisar sesiones activas en Plex: identificar usuarios/dispositivos que transcodifican, subtítulos quemados y audios que obligan a convertir."
+  elif printf "%s\n" "$joined" | grep -Eiq 'quick_check|DB ocupada|base de datos|sqlite3'; then
+    echo "2. Verificar DB Plex: instalar sqlite3 y repetir el doctor; si quick_check falla, priorizar backup y mantenimiento de DB."
+  else
+    echo "2. Atacar primero los problemas rojos del resumen; si solo hay amarillos, repetir prueba durante el fallo real."
+  fi
+
+  if printf "%s\n" "$joined" | grep -Eiq 'timeout/fallo de parada|SIGKILL|failed'; then
+    echo "3. Revisar el tramo del reinicio: journalctl -u plexmediaserver --since 'YYYY-MM-DD HH:MM' --no-pager para entender por qué Plex no cerró limpio."
+  else
+    echo "3. Guardar /tmp/plex-doctor-full.log y comparar con una segunda ejecución cuando el problema esté ocurriendo."
+  fi
+
+  echo "4. Evitar cambios destructivos hasta identificar causa: no borrar DB/cache ni desmontar rutas sin backup o ventana de mantenimiento."
+}
+
 write_summary() {
   (( HEALTH_SCORE < 0 )) && HEALTH_SCORE=0
   (( HEALTH_SCORE > 100 )) && HEALTH_SCORE=100
@@ -715,6 +793,10 @@ write_summary() {
     echo
     echo "Causa probable:"
     probable_cause
+    echo
+    write_interpretation
+    echo
+    write_action_plan
     echo
     echo "Comandos recomendados:"
     printf -- "- %s\n" "${RECOMMENDATIONS[@]}"

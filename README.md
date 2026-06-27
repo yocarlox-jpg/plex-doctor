@@ -39,6 +39,15 @@ Al terminar muestra un resumen fácil de copiar y pegar en ChatGPT, y además gu
 /tmp/plex-doctor-full.log
 ```
 
+El resumen incluye:
+
+- estado por área
+- problemas detectados
+- causa probable
+- interpretación de las señales
+- plan de actuación recomendado
+- comandos recomendados
+
 ## Instalación de dependencias opcionales
 
 El script funciona sin dependencias raras, pero puede dar más información si instalas herramientas estándar. `sqlite3` es especialmente recomendable porque permite comprobar la base de datos de Plex con `PRAGMA quick_check`.
@@ -86,6 +95,7 @@ El instalador usa `apt-get` e instala:
 - puerto `32400`
 - ubicación de logs
 - últimos errores relevantes en logs Plex
+- interpretación de errores comunes de Plex
 - tamaño de la base de datos
 - `PRAGMA quick_check` de la DB si existe `sqlite3`
 
