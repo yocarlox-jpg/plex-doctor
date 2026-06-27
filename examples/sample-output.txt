@@ -1,0 +1,37 @@
+════════════════════════════════════
+PLEX DOCTOR - RESUMEN
+════════════════════════════════════
+
+Servidor: plex-server
+Fecha: 2026-06-27T12:34:56+02:00
+Versión: 0.1.0
+
+Sistema ............ 🟢 OK
+CPU ................ 🟡 Load alto
+RAM ................ 🟢 OK
+Discos ............. 🔴 I/O wait alto
+Plex ............... 🟢 Running
+DB Plex ............ 🟢 OK
+Transcoder ......... 🟡 5 procesos activos
+rclone ............. 🔴 mount roto detectado
+Red ................ 🟢 OK
+
+Problemas detectados:
+🔴 /mnt/01.PEL no responde correctamente
+🟡 Load average alto para esta CPU (12.40 con 8 cores)
+🟡 Plex Transcoder activo con varios procesos (5)
+
+Causa probable:
+El servidor parece inestable por problema de mount/rclone o I/O, no por Plex directamente.
+
+Comandos recomendados:
+- revisar mount roto
+- revisar logs rclone
+- revisar disco/cache y mounts rclone
+- revisar transcodificaciones activas
+
+Puntuación salud: 72/100
+
+Logs guardados:
+- /tmp/plex-doctor-summary.txt
+- /tmp/plex-doctor-full.log
