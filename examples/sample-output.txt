@@ -4,7 +4,7 @@ PLEX DOCTOR - RESUMEN
 
 Servidor: plex-server
 Fecha: 2026-06-27T12:34:56+02:00
-Versión: 0.2.1
+Versión: 0.2.2
 
 Sistema ............ 🟢 OK
 CPU ................ 🟡 Load alto
@@ -20,6 +20,9 @@ Problemas detectados:
 🔴 /mnt/01.PEL no responde correctamente
 🟡 Load average alto para esta CPU (12.40 con 8 cores)
 🟡 Plex Transcoder activo con varios procesos (5)
+
+Notas informativas:
+ℹ️ sqlite3 del sistema no soporta collation ICU de la DB de Plex; quick_check inconcluso, no corrupción confirmada.
 
 Causa probable:
 El servidor parece inestable por problema de mount/rclone o I/O, no por Plex directamente.

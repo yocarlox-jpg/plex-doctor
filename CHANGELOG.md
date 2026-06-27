@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Separa notas informativas de problemas que afectan a la salud del servidor.
+- No penaliza perfiles de cliente Plex, `icu_root` ni transcoders moderados.
+- Mantiene como rojos los fallos reales de disco: SMART `FAILED` e I/O errors del kernel.
+
 ## 0.2.1
 
 - Corrige falso positivo de temperatura provocado por umbrales informativos `high` de `sensors`.

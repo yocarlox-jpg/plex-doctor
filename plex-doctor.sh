@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="0.2.1"
+VERSION="0.2.2"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
 INSTALL_OPTIONAL_DEPS=0
@@ -33,6 +33,7 @@ BAD_ICON="🔴"
 INFO_ICON="ℹ️"
 
 declare -a PROBLEMS=()
+declare -a INFO_NOTES=()
 declare -a RECOMMENDATIONS=()
 declare -a SUMMARY_LINES=()
 
@@ -149,6 +150,15 @@ add_problem() {
     "$WARN_ICON") HEALTH_SCORE=$((HEALTH_SCORE - 4)) ;;
     *) HEALTH_SCORE=$((HEALTH_SCORE - 2)) ;;
   esac
+}
+
+add_info() {
+  local message="$1"
+  local existing
+  for existing in "${INFO_NOTES[@]:-}"; do
+    [[ "$existing" == "$message" ]] && return
+  done
+  INFO_NOTES+=("$message")
 }
 
 add_recommendation() {
@@ -302,8 +312,12 @@ collect_plex() {
     journal_errors="$(journalctl -u plexmediaserver --since "24 hours ago" -p warning..alert --no-pager 2>/dev/null | tail -n 120 || true)"
     printf "%s\n" "${journal_errors:-sin warnings/errores recientes en journalctl}"
     if printf "%s\n" "$journal_errors" | grep -Eiq 'timed out|SIGKILL|failed with result|failed mode'; then
-      add_problem "$WARN_ICON" "Plex tuvo timeout/fallo de parada o arranque en las últimas 24h"
-      add_recommendation "revisar journalctl de plexmediaserver alrededor del último reinicio"
+      if [[ "$plex_active" == "active" ]]; then
+        add_info "Plex tuvo timeout/fallo de parada anterior, pero ahora está running; revisar solo si coincide con cortes."
+      else
+        add_problem "$WARN_ICON" "Plex tuvo timeout/fallo de parada o arranque en las últimas 24h"
+        add_recommendation "revisar journalctl de plexmediaserver alrededor del último reinicio"
+      fi
     fi
   else
     printf "%s%s journalctl no disponible%s\n" "$C_DIM" "$INFO_ICON" "$C_RESET"
@@ -314,14 +328,17 @@ collect_plex() {
 
   transcoder_count="$(count_processes 'Plex Transcoder')"
   print_kv "Plex Transcoder activos" "$transcoder_count"
-  if (( transcoder_count >= 8 )); then
+  if (( transcoder_count >= 10 )); then
     TRANSCODER_STATUS="${BAD_ICON} ${transcoder_count} procesos activos"
     add_problem "$BAD_ICON" "Plex Transcoder activo con muchos procesos (${transcoder_count})"
     add_recommendation "revisar transcodificaciones activas"
-  elif (( transcoder_count >= 3 )); then
+  elif (( transcoder_count >= 5 )); then
     TRANSCODER_STATUS="${WARN_ICON} ${transcoder_count} procesos activos"
     add_problem "$WARN_ICON" "Plex Transcoder activo con varios procesos (${transcoder_count})"
     add_recommendation "revisar transcodificaciones activas"
+  elif (( transcoder_count >= 1 )); then
+    TRANSCODER_STATUS="${OK_ICON} ${transcoder_count} procesos activos"
+    add_info "Hay ${transcoder_count} procesos Plex Transcoder; normal si hay usuarios reproduciendo con conversión."
   fi
 
   subsection "Puerto 32400"
@@ -358,16 +375,14 @@ collect_plex() {
       add_recommendation "revisar sesiones de transcodificación y permisos/cache de Transcode"
     fi
     if printf "%s\n" "$plex_errors" | grep -Eiq 'Unable to find client profile'; then
-      add_problem "$WARN_ICON" "Plex repite errores de perfil de cliente no encontrado"
-      add_recommendation "identificar cliente/dispositivo que fuerza transcodificación o perfil no reconocido"
+      add_info "Plex repite errores de perfil de cliente no encontrado; normalmente es ruido de app/TV salvo cortes en ese cliente."
     fi
     if printf "%s\n" "$plex_errors" | grep -Eiq 'Sleeping for .*busy DB|database is locked'; then
       add_problem "$WARN_ICON" "Plex detecta DB ocupada/bloqueada temporalmente"
       add_recommendation "comprobar DB con sqlite3 y revisar tareas pesadas de librería"
     fi
     if printf "%s\n" "$plex_errors" | grep -Eiq 'Session appears to have died|TranscodeOutputStream'; then
-      add_problem "$WARN_ICON" "sesiones de transcodificación parecen morir durante reproducción"
-      add_recommendation "revisar clientes afectados, subtítulos y carga de transcodificación"
+      add_info "Alguna sesión de transcodificación murió; puede ser cliente que cerró reproducción si no coincide con quejas de usuario."
     fi
   else
     printf "%s%s no existe o no es accesible%s\n" "$C_YELLOW" "$log_dir" "$C_RESET"
@@ -386,7 +401,7 @@ collect_plex() {
         PLEX_DB_STATUS="${OK_ICON} OK"
       elif printf "%s\n" "$quick_check" | grep -Eiq 'no such collation sequence: icu'; then
         PLEX_DB_STATUS="${WARN_ICON} quick_check inconcluso"
-        add_problem "$WARN_ICON" "sqlite3 del sistema no soporta collation ICU de la DB de Plex; quick_check inconcluso"
+        add_info "sqlite3 del sistema no soporta collation ICU de la DB de Plex; quick_check inconcluso, no corrupción confirmada."
         add_recommendation "no asumir corrupción de DB por icu_root; revisar DB solo si hay síntomas o logs de corrupción"
       else
         PLEX_DB_STATUS="${BAD_ICON} quick_check falla"
@@ -799,6 +814,13 @@ write_summary() {
       echo "${OK_ICON} No se detectaron problemas claros."
     else
       printf "%s\n" "${PROBLEMS[@]}"
+    fi
+    echo
+    echo "Notas informativas:"
+    if ((${#INFO_NOTES[@]} == 0)); then
+      echo "${OK_ICON} Sin notas informativas relevantes."
+    else
+      printf "ℹ️ %s\n" "${INFO_NOTES[@]}"
     fi
     echo
     echo "Causa probable:"
