@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4
+
+- Añade `--version` para comprobar rápidamente qué versión está instalada en el servidor.
+- Trunca líneas enormes de `systemctl status plexmediaserver` para que las transcodificaciones no saturen la salida.
+
 ## 0.1.3
 
 - Añade aviso inicial cuando falta `sqlite3`.

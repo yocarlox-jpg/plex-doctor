@@ -10,6 +10,12 @@ Está pensada para revisar problemas típicos de Plex, rclone/FUSE, discos, kern
 sudo bash plex-doctor.sh
 ```
 
+Para comprobar qué versión tienes:
+
+```bash
+bash plex-doctor.sh --version
+```
+
 El script es de solo lectura:
 
 - no reinicia servicios

@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="0.1.3"
+VERSION="0.1.4"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
 INSTALL_OPTIONAL_DEPS=0
@@ -56,6 +56,7 @@ Uso:
 Opciones:
   --install-deps           Instala dependencias opcionales con apt-get antes del diagnóstico.
   --install-optional-deps  Alias de --install-deps.
+  --version                Muestra la versión y termina.
   -h, --help               Muestra esta ayuda.
 
 Modo normal: solo lectura, no modifica el sistema.
@@ -71,6 +72,10 @@ parse_args() {
         ;;
       -h|--help)
         usage
+        exit 0
+        ;;
+      --version)
+        printf "plex-doctor %s\n" "$VERSION"
         exit 0
         ;;
       *)
@@ -187,6 +192,12 @@ print_kv() {
   printf "%-24s %s\n" "$1:" "$2"
 }
 
+print_compact_systemctl_status() {
+  printf "\n%s$ systemctl status plexmediaserver --no-pager --lines=35%s\n" "${C_DIM}" "${C_RESET}"
+  systemctl status plexmediaserver --no-pager --lines=35 2>&1 \
+    | sed -E 's/(Plex Transcoder|Plex Media Scanner|Plex Media Fingerprinter|Plex EAE Service).{120}.*/\1 ... [línea truncada]/'
+}
+
 collect_system() {
   section "1. Sistema"
 
@@ -269,7 +280,7 @@ collect_plex() {
 
   if have systemctl; then
     plex_active="$(systemctl is-active plexmediaserver 2>/dev/null || true)"
-    run_cmd "systemctl status plexmediaserver" systemctl status plexmediaserver --no-pager --lines=35
+    print_compact_systemctl_status
     case "$plex_active" in
       active) PLEX_STATUS="${OK_ICON} Running" ;;
       inactive|failed)
