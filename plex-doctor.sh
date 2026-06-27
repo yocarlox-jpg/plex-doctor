@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="0.2.0"
+VERSION="0.2.1"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
 INSTALL_OPTIONAL_DEPS=0
@@ -145,8 +145,8 @@ add_problem() {
   local message="$2"
   PROBLEMS+=("${severity} ${message}")
   case "$severity" in
-    "$BAD_ICON") HEALTH_SCORE=$((HEALTH_SCORE - 15)) ;;
-    "$WARN_ICON") HEALTH_SCORE=$((HEALTH_SCORE - 6)) ;;
+    "$BAD_ICON") HEALTH_SCORE=$((HEALTH_SCORE - 12)) ;;
+    "$WARN_ICON") HEALTH_SCORE=$((HEALTH_SCORE - 4)) ;;
     *) HEALTH_SCORE=$((HEALTH_SCORE - 2)) ;;
   esac
 }
@@ -263,7 +263,7 @@ collect_system() {
   if have sensors; then
     temp_output="$(sensors 2>/dev/null || true)"
     printf "%s\n" "$temp_output"
-    if printf "%s\n" "$temp_output" | grep -Eiq 'crit|alarm|high'; then
+    if printf "%s\n" "$temp_output" | grep -Eiq 'ALARM|CRITICAL|EMERGENCY'; then
       SYSTEM_STATUS="${WARN_ICON} Temperatura con alerta"
       add_problem "$WARN_ICON" "sensors muestra alerta térmica"
       add_recommendation "revisar temperatura y ventilación"
@@ -384,6 +384,10 @@ collect_plex() {
       print_kv "PRAGMA quick_check" "$quick_check"
       if [[ "$quick_check" == "ok" ]]; then
         PLEX_DB_STATUS="${OK_ICON} OK"
+      elif printf "%s\n" "$quick_check" | grep -Eiq 'no such collation sequence: icu'; then
+        PLEX_DB_STATUS="${WARN_ICON} quick_check inconcluso"
+        add_problem "$WARN_ICON" "sqlite3 del sistema no soporta collation ICU de la DB de Plex; quick_check inconcluso"
+        add_recommendation "no asumir corrupción de DB por icu_root; revisar DB solo si hay síntomas o logs de corrupción"
       else
         PLEX_DB_STATUS="${BAD_ICON} quick_check falla"
         add_problem "$BAD_ICON" "sqlite3 PRAGMA quick_check no devuelve ok para la DB de Plex"
@@ -466,10 +470,16 @@ collect_disks() {
         printf "\n/dev/%s\n" "$disk"
         smart_output="$(smartctl -H "/dev/$disk" 2>&1 || true)"
         printf "%s\n" "$smart_output"
-        if printf "%s\n" "$smart_output" | grep -Eiq 'FAILED|prefail|unknown'; then
+        if printf "%s\n" "$smart_output" | grep -Eiq 'SMART overall-health.*FAILED|Drive failure expected'; then
           DISK_STATUS="${BAD_ICON} SMART alerta"
           add_problem "$BAD_ICON" "SMART alerta en /dev/${disk}"
+          if printf "%s\n" "$smart_output" | grep -Eiq 'Drive failure expected'; then
+            add_recommendation "hacer backup o migrar datos de /dev/${disk} cuanto antes"
+          fi
           add_recommendation "revisar SMART completo y estado físico del disco"
+        elif printf "%s\n" "$smart_output" | grep -Eiq 'SMART overall-health.*UNKNOWN|SMART support is: Unavailable'; then
+          add_problem "$WARN_ICON" "SMART no concluyente en /dev/${disk}"
+          add_recommendation "revisar SMART completo si el disco es físico o está detrás de controladora"
         fi
       done <<< "$disk_names"
     else

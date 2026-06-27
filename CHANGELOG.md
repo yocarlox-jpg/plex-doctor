@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Corrige falso positivo de temperatura provocado por umbrales informativos `high` de `sensors`.
+- Trata `sqlite3` con error `icu_root` como comprobación inconclusa, no como corrupción confirmada de DB.
+- Recalibra la puntuación de salud para que avisos repetidos no hundan tanto el score.
+- Hace la detección SMART más precisa y mantiene rojo solo para `FAILED`/fallo esperado.
+
 ## 0.2.0
 
 - Añade sección `Interpretación` en el resumen final con explicación de las señales detectadas.
