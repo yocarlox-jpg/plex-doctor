@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2
+
+- Añade fallback de `lsblk` compatible con Ubuntu 20.04.
+- Acorta `systemctl status plexmediaserver` para evitar comandos enormes de transcodificación.
+- Evita que la ausencia de `sqlite3` se interprete como causa probable de fallo de Plex.
+- Detecta timeouts/fallos recientes de `plexmediaserver` en `journalctl` como advertencia.
+- Cuenta procesos `rclone` reales con `pgrep -x`.
+
 ## 0.1.1
 
 - Corrige compatibilidad con `gawk` en Ubuntu 20.04 evitando usar `load` como variable interna.

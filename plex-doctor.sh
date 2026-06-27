@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="0.1.1"
+VERSION="0.1.2"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
 
@@ -96,6 +96,24 @@ safe_timeout() {
   fi
 }
 
+count_processes() {
+  local pattern="$1"
+  if have pgrep; then
+    pgrep -f "$pattern" 2>/dev/null | wc -l | awk '{print $1}'
+  else
+    ps -eo args 2>/dev/null | grep -Ei "$pattern" | grep -vc grep || true
+  fi
+}
+
+count_process_names() {
+  local name="$1"
+  if have pgrep; then
+    pgrep -x "$name" 2>/dev/null | wc -l | awk '{print $1}'
+  else
+    ps -eo comm 2>/dev/null | awk -v name="$name" '$0 == name {count++} END {print count+0}'
+  fi
+}
+
 print_kv() {
   printf "%-24s %s\n" "$1:" "$2"
 }
@@ -178,11 +196,11 @@ collect_system() {
 collect_plex() {
   section "2. Plex"
 
-  local plex_active transcoder_count port_listen log_dir db_file db_size quick_check plex_errors
+  local plex_active transcoder_count port_listen log_dir db_file db_size quick_check plex_errors journal_errors
 
   if have systemctl; then
     plex_active="$(systemctl is-active plexmediaserver 2>/dev/null || true)"
-    run_cmd "systemctl status plexmediaserver" systemctl status plexmediaserver --no-pager -l
+    run_cmd "systemctl status plexmediaserver" systemctl status plexmediaserver --no-pager --lines=35
     case "$plex_active" in
       active) PLEX_STATUS="${OK_ICON} Running" ;;
       inactive|failed)
@@ -201,7 +219,12 @@ collect_plex() {
 
   subsection "Errores journalctl Plex últimas 24h"
   if have journalctl; then
-    journalctl -u plexmediaserver --since "24 hours ago" -p warning..alert --no-pager 2>/dev/null | tail -n 120 || true
+    journal_errors="$(journalctl -u plexmediaserver --since "24 hours ago" -p warning..alert --no-pager 2>/dev/null | tail -n 120 || true)"
+    printf "%s\n" "${journal_errors:-sin warnings/errores recientes en journalctl}"
+    if printf "%s\n" "$journal_errors" | grep -Eiq 'timed out|SIGKILL|failed with result|failed mode'; then
+      add_problem "$WARN_ICON" "Plex tuvo timeout/fallo de parada o arranque en las últimas 24h"
+      add_recommendation "revisar journalctl de plexmediaserver alrededor del último reinicio"
+    fi
   else
     printf "%s%s journalctl no disponible%s\n" "$C_DIM" "$INFO_ICON" "$C_RESET"
   fi
@@ -209,7 +232,7 @@ collect_plex() {
   subsection "Procesos Plex"
   ps -eo pid,ppid,user,comm,args,%cpu,%mem --sort=-%cpu 2>/dev/null | grep -i '[P]lex' | head -n 30 || true
 
-  transcoder_count="$(pgrep -fc 'Plex Transcoder' 2>/dev/null || echo 0)"
+  transcoder_count="$(count_processes 'Plex Transcoder')"
   print_kv "Plex Transcoder activos" "$transcoder_count"
   if (( transcoder_count >= 8 )); then
     TRANSCODER_STATUS="${BAD_ICON} ${transcoder_count} procesos activos"
@@ -291,7 +314,18 @@ collect_disks() {
   run_cmd "df -ih" df -ih
 
   subsection "lsblk"
-  run_cmd "lsblk" lsblk -o NAME,TYPE,SIZE,FSTYPE,LABEL,MOUNTPOINTS,MODEL,SERIAL
+  if have lsblk; then
+    if lsblk -o NAME,TYPE,SIZE,FSTYPE,LABEL,MOUNTPOINTS,MODEL,SERIAL >/tmp/plex-doctor-lsblk.$$ 2>/tmp/plex-doctor-lsblk-err.$$; then
+      cat /tmp/plex-doctor-lsblk.$$
+    elif lsblk -o NAME,TYPE,SIZE,FSTYPE,LABEL,MOUNTPOINT >/tmp/plex-doctor-lsblk.$$ 2>/tmp/plex-doctor-lsblk-err.$$; then
+      cat /tmp/plex-doctor-lsblk.$$
+    else
+      lsblk 2>&1 || true
+    fi
+    rm -f /tmp/plex-doctor-lsblk.$$ /tmp/plex-doctor-lsblk-err.$$ 2>/dev/null || true
+  else
+    printf "%s%s lsblk no disponible%s\n" "$C_DIM" "$INFO_ICON" "$C_RESET"
+  fi
 
   local high_usage high_inode iowait disk_names disk smart_output kernel_io
   high_usage="$(df -P 2>/dev/null | awk 'NR>1 {gsub("%","",$5); if ($5 >= 95) print $6 " " $5 "%"}')"
@@ -369,7 +403,7 @@ collect_rclone() {
 
   subsection "Procesos rclone"
   ps -eo pid,ppid,user,comm,args,%cpu,%mem --sort=-%cpu 2>/dev/null | grep -i '[r]clone' | head -n 30 || true
-  rclone_count="$(pgrep -fc rclone 2>/dev/null || echo 0)"
+  rclone_count="$(count_process_names rclone)"
   print_kv "Procesos rclone" "$rclone_count"
 
   subsection "Mounts fuse.rclone"
@@ -550,8 +584,10 @@ probable_cause() {
 
   if printf "%s\n" "$joined" | grep -Eiq 'mount|rclone|I/O wait|I/O'; then
     echo "El servidor parece inestable por problema de mount/rclone o I/O, no por Plex directamente."
-  elif printf "%s\n" "$joined" | grep -Eiq 'DB|base de datos|quick_check'; then
+  elif printf "%s\n" "$joined" | grep -Eiq 'quick_check|errores de base de datos|integridad de la DB'; then
     echo "El síntoma principal apunta a la base de datos de Plex o a errores internos de Plex."
+  elif printf "%s\n" "$joined" | grep -Eiq 'Transcoder'; then
+    echo "La carga actual parece venir sobre todo de transcodificaciones activas en Plex."
   elif printf "%s\n" "$joined" | grep -Eiq 'RAM|Swap|OOM'; then
     echo "El servidor muestra presión de memoria; Plex puede estar afectado como consecuencia."
   elif printf "%s\n" "$joined" | grep -Eiq 'Gateway|DNS|internet|32400'; then
