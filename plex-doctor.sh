@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="0.4.0"
+VERSION="0.4.1"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
 AUTO_INSTALL_DEPS=1
@@ -191,7 +191,7 @@ count_text_matches() {
 
 print_plex_error_summary() {
   local errors="$1"
-  local client_profile h264 transcode_dead db_errors eae_errors
+  local client_profile h264 transcode_dead db_corruption db_busy eae_errors
 
   if [[ -z "$errors" ]]; then
     printf "\nResumen de errores Plex:\n%s\n" "sin errores recientes encontrados"
@@ -201,18 +201,25 @@ print_plex_error_summary() {
   client_profile="$(count_text_matches "$errors" 'Unable to find client profile|ClientProfileExtra')"
   h264="$(count_text_matches "$errors" 'non-existing PPS|decode_slice_header|no frame|invalid NAL|error while decoding|h264')"
   transcode_dead="$(count_text_matches "$errors" 'Session appears to have died|TranscodeOutputStream')"
-  db_errors="$(count_text_matches "$errors" 'database is locked|corrupt|malformed|busy DB')"
+  db_corruption="$(count_text_matches "$errors" 'database disk image is malformed|database corruption|database is corrupt|SQLITE_CORRUPT|malformed|not a database|file is encrypted or is not a database|corrupt')"
+  db_busy="$(count_text_matches "$errors" 'database is locked|busy DB|SQLITE_BUSY|Sleeping for .*busy DB|retry busy DB')"
   eae_errors="$(count_text_matches "$errors" 'Error iterating EAE watchfolder|EasyAudioEncoder|EAE')"
 
   printf "\nResumen de errores Plex:\n"
-  (( db_errors > 0 )) && printf -- "- %s posibles errores de DB. Revisar solo si coinciden con cortes o corrupción.\n" "$db_errors"
+  (( db_corruption > 0 )) && printf -- "- %s señales de posible corrupción de DB. Esto sí es importante: backup antes de tocar nada.\n" "$db_corruption"
+  (( db_busy > 0 )) && printf -- "- %s señales de DB ocupada/bloqueada. Suele ser temporal si coincide con escaneos, metadatos o mucha actividad.\n" "$db_busy"
   (( eae_errors > 0 )) && printf -- "- %s errores EAE/transcode. Suelen venir de audio/subtítulos/transcodificación.\n" "$eae_errors"
   (( h264 > 0 )) && printf -- "- %s errores H264/decode. Normalmente apuntan a un vídeo/stream/cliente concreto, no a Plex entero.\n" "$h264"
   (( transcode_dead > 0 )) && printf -- "- %s sesiones de transcode caídas. Puede ser normal si el cliente cerró reproducción.\n" "$transcode_dead"
   (( client_profile > 0 )) && printf -- "- %s errores de perfil cliente. Suele ser ruido de una app/TV concreta.\n" "$client_profile"
 
-  if (( db_errors + eae_errors + h264 + transcode_dead + client_profile == 0 )); then
+  if (( db_corruption + db_busy + eae_errors + h264 + transcode_dead + client_profile == 0 )); then
     printf -- "- Hay errores en logs, pero no coinciden con patrones frecuentes clasificados.\n"
+  fi
+
+  if (( db_corruption + db_busy > 0 )); then
+    printf "\nLíneas DB recientes, máximo 5:\n"
+    printf "%s\n" "$errors" | grep -Ei 'database disk image is malformed|database corruption|database is corrupt|SQLITE_CORRUPT|malformed|not a database|file is encrypted or is not a database|corrupt|database is locked|busy DB|SQLITE_BUSY|Sleeping for .*busy DB|retry busy DB' | tail -n 5
   fi
 
   printf "\nÚltimas líneas crudas, máximo 12:\n"
@@ -337,6 +344,10 @@ collect_plex() {
   section "2. Plex"
 
   local plex_active transcoder_count port_listen log_dir db_file db_size plex_errors journal_errors
+  local db_corruption_pattern db_busy_pattern db_corruption_count db_busy_count
+
+  db_corruption_pattern='database disk image is malformed|database corruption|database is corrupt|SQLITE_CORRUPT|malformed|not a database|file is encrypted or is not a database|corrupt'
+  db_busy_pattern='database is locked|busy DB|SQLITE_BUSY|Sleeping for .*busy DB|retry busy DB'
 
   if have systemctl; then
     plex_active="$(systemctl is-active plexmediaserver 2>/dev/null || true)"
@@ -413,12 +424,21 @@ collect_plex() {
   print_kv "Ubicación esperada" "$log_dir"
   if [[ -d "$log_dir" ]]; then
     find "$log_dir" -maxdepth 1 -type f -name '*.log' -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort | tail -n 10 || true
-    plex_errors="$(grep -RihE 'error|critical|exception|database is locked|corrupt|decode_slice_header|non-existing PPS|no frame' "$log_dir"/*.log 2>/dev/null | tail -n 80 || true)"
+    plex_errors="$(grep -RihE 'error|critical|exception|database is locked|busy DB|SQLITE_BUSY|SQLITE_CORRUPT|malformed|not a database|corrupt|decode_slice_header|non-existing PPS|no frame' "$log_dir"/*.log 2>/dev/null | tail -n 80 || true)"
     print_plex_error_summary "$plex_errors"
-    if printf "%s\n" "$plex_errors" | grep -Eiq 'database is locked|corrupt|malformed'; then
-      PLEX_DB_STATUS="${BAD_ICON} Errores en logs"
-      add_problem "$BAD_ICON" "logs de Plex muestran posibles errores de base de datos"
+    db_corruption_count="$(count_text_matches "$plex_errors" "$db_corruption_pattern")"
+    db_busy_count="$(count_text_matches "$plex_errors" "$db_busy_pattern")"
+    if (( db_corruption_count > 0 )); then
+      PLEX_DB_STATUS="${BAD_ICON} Posible corrupción"
+      add_problem "$BAD_ICON" "logs de Plex muestran posible corrupción de base de datos (${db_corruption_count} líneas)"
       add_recommendation "revisar base de datos de Plex y backups"
+    elif (( db_busy_count >= 10 )); then
+      PLEX_DB_STATUS="${WARN_ICON} DB ocupada"
+      add_problem "$WARN_ICON" "Plex detecta DB ocupada/bloqueada repetidamente (${db_busy_count} líneas)"
+      add_recommendation "revisar tareas pesadas de librería y logs de Plex relacionados con DB"
+    elif (( db_busy_count > 0 )); then
+      PLEX_DB_STATUS="${OK_ICON} Busy puntual"
+      add_info "Plex detectó DB ocupada/bloqueada de forma puntual (${db_busy_count} líneas); suele ser normal durante escaneos o mucha actividad."
     fi
     if printf "%s\n" "$plex_errors" | grep -Eiq 'Error iterating EAE watchfolder'; then
       add_problem "$WARN_ICON" "Plex EAE/transcodificación muestra errores de watchfolder"
@@ -429,10 +449,6 @@ collect_plex() {
     fi
     if printf "%s\n" "$plex_errors" | grep -Eiq 'non-existing PPS|decode_slice_header|no frame|invalid NAL|error while decoding'; then
       add_info "Plex muestra errores H264/decode; normalmente apuntan a un archivo, stream o cliente concreto, no a un fallo global del servidor."
-    fi
-    if printf "%s\n" "$plex_errors" | grep -Eiq 'Sleeping for .*busy DB|database is locked'; then
-      add_problem "$WARN_ICON" "Plex detecta DB ocupada/bloqueada temporalmente"
-      add_recommendation "revisar tareas pesadas de librería y logs de Plex relacionados con DB"
     fi
     if printf "%s\n" "$plex_errors" | grep -Eiq 'Session appears to have died|TranscodeOutputStream'; then
       add_info "Alguna sesión de transcodificación murió; puede ser cliente que cerró reproducción si no coincide con quejas de usuario."
@@ -447,7 +463,11 @@ collect_plex() {
   if [[ -f "$db_file" ]]; then
     db_size="$(du -h "$db_file" 2>/dev/null | awk '{print $1}')"
     print_kv "Tamaño DB" "${db_size:-desconocido}"
-    PLEX_DB_STATUS="${OK_ICON} Tamaño leído"
+    if [[ "$PLEX_DB_STATUS" == "${WARN_ICON} No comprobado" ]]; then
+      PLEX_DB_STATUS="${OK_ICON} Tamaño leído"
+    else
+      print_kv "Estado por logs" "$PLEX_DB_STATUS"
+    fi
   else
     PLEX_DB_STATUS="${WARN_ICON} DB no encontrada"
     add_problem "$WARN_ICON" "no se encontró la DB de Plex en la ruta estándar"
@@ -742,8 +762,10 @@ probable_cause() {
     echo "El síntoma principal apunta a almacenamiento físico o enlace SATA: disco, cable, backplane, puerto o controladora."
   elif printf "%s\n" "$joined" | grep -Eiq 'mount|rclone|I/O wait'; then
     echo "El servidor parece inestable por problema de mount/rclone o I/O, no por Plex directamente."
-  elif printf "%s\n" "$joined" | grep -Eiq 'errores de base de datos|integridad de la DB'; then
-    echo "El síntoma principal apunta a la base de datos de Plex o a errores internos de Plex."
+  elif printf "%s\n" "$joined" | grep -Eiq 'corrupción de base de datos'; then
+    echo "El síntoma principal apunta a posible corrupción de la base de datos de Plex."
+  elif printf "%s\n" "$joined" | grep -Eiq 'DB ocupada|DB.*bloqueada|base de datos'; then
+    echo "El síntoma principal apunta a la DB de Plex ocupada o bloqueada por actividad interna."
   elif printf "%s\n" "$joined" | grep -Eiq 'Transcoder'; then
     echo "La carga actual parece venir sobre todo de transcodificaciones activas en Plex."
   elif printf "%s\n" "$joined" | grep -Eiq 'RAM|Swap|OOM'; then
@@ -776,6 +798,18 @@ write_plain_diagnosis() {
     echo "- Qué NO parece culpable: Plex puede quedarse esperando datos, pero no tiene por qué ser el origen."
     echo "- Qué hacer ahora: revisar logs de rclone, estado del remote y estabilidad del mount afectado."
     score_reason="Baja sobre todo por mount/rclone."
+  elif printf "%s\n" "$joined" | grep -Eiq 'corrupción de base de datos'; then
+    echo "- Problema principal: posible corrupción de la DB de Plex."
+    echo "- ¿Es real?: sí, aparece en logs de Plex; no significa reparar ya, significa hacer backup antes de tocar."
+    echo "- Qué NO parece culpable: CPU, RAM, discos, rclone y red están OK en esta ejecución."
+    echo "- Qué hacer ahora: guardar /tmp/plex-doctor-full.log, hacer backup de la DB y revisar las líneas exactas antes de mantenimiento."
+    score_reason="Baja por señales de posible corrupción de DB."
+  elif printf "%s\n" "$joined" | grep -Eiq 'DB ocupada|DB.*bloqueada'; then
+    echo "- Problema principal: DB de Plex ocupada/bloqueada repetidamente."
+    echo "- ¿Es real?: sí, Plex lo registró en logs, pero puede ser temporal durante escaneos, metadatos o mucha actividad."
+    echo "- Qué NO parece culpable: no hay señal de fallo de disco, rclone o red en esta ejecución."
+    echo "- Qué hacer ahora: revisar si coincide con escaneo de librería, intro/credits detection, metadatos o muchos usuarios."
+    score_reason="Baja por DB ocupada repetidamente, no por corrupción confirmada."
   elif printf "%s\n" "$joined" | grep -Eiq 'Transcoder activo|transcodificación'; then
     echo "- Problema principal: carga por transcodificación."
     echo "- ¿Es real?: sí, hay procesos Plex Transcoder activos; puede ser normal si hay usuarios viendo contenido."
@@ -814,8 +848,10 @@ write_interpretation() {
   if printf "%s\n" "$joined" | grep -Eiq 'Transcoder activo|transcodificación'; then
     echo "- Hay transcodificación activa. Esto puede explicar load alto, CPU alta y errores EAE, sobre todo con subtítulos quemados, audio EAC3/DTS o clientes poco compatibles."
   fi
-  if printf "%s\n" "$joined" | grep -Eiq 'DB ocupada|DB.*bloqueada|base de datos'; then
-    echo "- La DB de Plex merece revisión solo porque hay señales reales en logs; Plex Doctor no la toca ni la modifica."
+  if printf "%s\n" "$joined" | grep -Eiq 'corrupción de base de datos'; then
+    echo "- La DB de Plex muestra señales compatibles con corrupción. Prioridad: backup de la DB antes de cualquier reparación o limpieza."
+  elif printf "%s\n" "$joined" | grep -Eiq 'DB ocupada|DB.*bloqueada|base de datos'; then
+    echo "- La DB de Plex aparece ocupada/bloqueada. Esto suele pasar con escaneos, metadatos, tareas programadas o mucha actividad; solo preocupa si se repite y coincide con lentitud/cortes."
   fi
   if printf "%s\n" "$joined" | grep -Eiq 'perfil de cliente'; then
     echo "- Los errores de perfil de cliente suelen venir de TVs/apps concretas. Normalmente no tiran Plex, pero pueden forzar transcodificación o provocar reproducción irregular."
@@ -847,8 +883,10 @@ write_action_plan() {
     echo "2. Revisar almacenamiento antes que Plex: comprobar que los mounts rclone responden, mirar logs de rclone y confirmar que el disco/cache no está saturado."
   elif printf "%s\n" "$joined" | grep -Eiq 'Transcoder activo|transcodificación'; then
     echo "2. Revisar sesiones activas en Plex: identificar usuarios/dispositivos que transcodifican, subtítulos quemados y audios que obligan a convertir."
+  elif printf "%s\n" "$joined" | grep -Eiq 'corrupción de base de datos'; then
+    echo "2. Hacer backup de la DB de Plex y revisar las líneas exactas del full log antes de cualquier mantenimiento."
   elif printf "%s\n" "$joined" | grep -Eiq 'DB ocupada|base de datos'; then
-    echo "2. Revisar DB Plex solo si hay síntomas reales o logs de corrupción; priorizar backup antes de mantenimiento."
+    echo "2. Revisar qué tarea de Plex estaba activa: escaneo, metadatos, detección de intros/créditos o muchos usuarios."
   else
     echo "2. Atacar primero los problemas rojos del resumen; si solo hay amarillos, repetir prueba durante el fallo real."
   fi

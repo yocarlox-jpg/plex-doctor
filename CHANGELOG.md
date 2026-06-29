@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1
+
+- Separa señales de DB corrupta de DB ocupada/bloqueada temporalmente.
+- Evita marcar `database is locked` puntual como error rojo de corrupción.
+- Muestra las líneas DB recientes que justifican el aviso.
+- Evita que el tamaño leído de la DB tape un estado problemático detectado en logs.
+
 ## 0.4.0
 
 - El modo normal intenta instalar herramientas de diagnóstico faltantes con `apt-get`.
