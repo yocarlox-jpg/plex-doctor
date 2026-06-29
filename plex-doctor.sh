@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="0.4.2"
+VERSION="0.4.3"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
 AUTO_INSTALL_DEPS=1
@@ -187,6 +187,10 @@ count_text_matches() {
   local text="$1"
   local pattern="$2"
   printf "%s\n" "$text" | grep -Eic "$pattern" 2>/dev/null || true
+}
+
+filter_content_level_plex_noise() {
+  grep -Eiv 'Corrupto\.(mkv|mp4|avi|mov|m4v)|CorruptedMetadataItemClusters|corrupt(ed)? (file|media|movie|video|part|packet|frame)|file .*corrupt|moov atom not found|Invalid data found when processing input' 2>/dev/null || true
 }
 
 print_plex_error_summary() {
@@ -424,7 +428,7 @@ collect_plex() {
   print_kv "Ubicación esperada" "$log_dir"
   if [[ -d "$log_dir" ]]; then
     find "$log_dir" -maxdepth 1 -type f -name '*.log' -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort | tail -n 10 || true
-    plex_errors="$(grep -RihE 'error|critical|exception|database is locked|busy DB|SQLITE_BUSY|SQLITE_CORRUPT|SQLITE_NOTADB|not a database|file is encrypted or is not a database|database disk image is malformed|database corruption|database is corrupt|decode_slice_header|non-existing PPS|no frame' "$log_dir"/*.log 2>/dev/null | tail -n 80 || true)"
+    plex_errors="$(grep -RihE 'error|critical|exception|database is locked|busy DB|SQLITE_BUSY|SQLITE_CORRUPT|SQLITE_NOTADB|not a database|file is encrypted or is not a database|database disk image is malformed|database corruption|database is corrupt|decode_slice_header|non-existing PPS|no frame' "$log_dir"/*.log 2>/dev/null | filter_content_level_plex_noise | tail -n 80 || true)"
     print_plex_error_summary "$plex_errors"
     db_corruption_count="$(count_text_matches "$plex_errors" "$db_corruption_pattern")"
     db_busy_count="$(count_text_matches "$plex_errors" "$db_busy_pattern")"

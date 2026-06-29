@@ -106,6 +106,7 @@ El instalador usa `apt-get` e instala:
 - interpretación de errores comunes de Plex
 - tamaño de la base de datos
 - no toca ni modifica la DB; usa tamaño y logs reales para detectar señales de corrupción o bloqueo
+- ignora errores de contenido aislado, como archivos de vídeo corruptos, porque no indican salud general del servidor
 
 ### Discos
 

@@ -4,7 +4,7 @@ PLEX DOCTOR - RESUMEN
 
 Servidor: plex-server
 Fecha: 2026-06-27T12:34:56+02:00
-Versión: 0.4.2
+Versión: 0.4.3
 
 EN CLARO:
 - Problema principal: almacenamiento/disco/SATA.

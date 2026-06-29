@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3
+
+- Ignora ruido de contenido multimedia corrupto en logs de Plex.
+- No considera archivos de vídeo corruptos, frames/paquetes inválidos o títulos con `Corrupto` como fallo de salud del servidor.
+- Mantiene la detección de errores reales de DB SQLite y problemas de funcionamiento general.
+
 ## 0.4.2
 
 - Corrige falso positivo de corrupción DB causado por la palabra `corrupt` en nombres de archivos o fixups internos de Plex.
