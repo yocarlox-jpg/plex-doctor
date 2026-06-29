@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="0.4.1"
+VERSION="0.4.2"
 SUMMARY_FILE="/tmp/plex-doctor-summary.txt"
 FULL_LOG="/tmp/plex-doctor-full.log"
 AUTO_INSTALL_DEPS=1
@@ -201,7 +201,7 @@ print_plex_error_summary() {
   client_profile="$(count_text_matches "$errors" 'Unable to find client profile|ClientProfileExtra')"
   h264="$(count_text_matches "$errors" 'non-existing PPS|decode_slice_header|no frame|invalid NAL|error while decoding|h264')"
   transcode_dead="$(count_text_matches "$errors" 'Session appears to have died|TranscodeOutputStream')"
-  db_corruption="$(count_text_matches "$errors" 'database disk image is malformed|database corruption|database is corrupt|SQLITE_CORRUPT|malformed|not a database|file is encrypted or is not a database|corrupt')"
+  db_corruption="$(count_text_matches "$errors" 'database disk image is malformed|database corruption|database is corrupt|SQLITE_CORRUPT|SQLITE_NOTADB|not a database|file is encrypted or is not a database')"
   db_busy="$(count_text_matches "$errors" 'database is locked|busy DB|SQLITE_BUSY|Sleeping for .*busy DB|retry busy DB')"
   eae_errors="$(count_text_matches "$errors" 'Error iterating EAE watchfolder|EasyAudioEncoder|EAE')"
 
@@ -219,7 +219,7 @@ print_plex_error_summary() {
 
   if (( db_corruption + db_busy > 0 )); then
     printf "\nLíneas DB recientes, máximo 5:\n"
-    printf "%s\n" "$errors" | grep -Ei 'database disk image is malformed|database corruption|database is corrupt|SQLITE_CORRUPT|malformed|not a database|file is encrypted or is not a database|corrupt|database is locked|busy DB|SQLITE_BUSY|Sleeping for .*busy DB|retry busy DB' | tail -n 5
+    printf "%s\n" "$errors" | grep -Ei 'database disk image is malformed|database corruption|database is corrupt|SQLITE_CORRUPT|SQLITE_NOTADB|not a database|file is encrypted or is not a database|database is locked|busy DB|SQLITE_BUSY|Sleeping for .*busy DB|retry busy DB' | tail -n 5
   fi
 
   printf "\nÚltimas líneas crudas, máximo 12:\n"
@@ -346,7 +346,7 @@ collect_plex() {
   local plex_active transcoder_count port_listen log_dir db_file db_size plex_errors journal_errors
   local db_corruption_pattern db_busy_pattern db_corruption_count db_busy_count
 
-  db_corruption_pattern='database disk image is malformed|database corruption|database is corrupt|SQLITE_CORRUPT|malformed|not a database|file is encrypted or is not a database|corrupt'
+  db_corruption_pattern='database disk image is malformed|database corruption|database is corrupt|SQLITE_CORRUPT|SQLITE_NOTADB|not a database|file is encrypted or is not a database'
   db_busy_pattern='database is locked|busy DB|SQLITE_BUSY|Sleeping for .*busy DB|retry busy DB'
 
   if have systemctl; then
@@ -424,7 +424,7 @@ collect_plex() {
   print_kv "Ubicación esperada" "$log_dir"
   if [[ -d "$log_dir" ]]; then
     find "$log_dir" -maxdepth 1 -type f -name '*.log' -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort | tail -n 10 || true
-    plex_errors="$(grep -RihE 'error|critical|exception|database is locked|busy DB|SQLITE_BUSY|SQLITE_CORRUPT|malformed|not a database|corrupt|decode_slice_header|non-existing PPS|no frame' "$log_dir"/*.log 2>/dev/null | tail -n 80 || true)"
+    plex_errors="$(grep -RihE 'error|critical|exception|database is locked|busy DB|SQLITE_BUSY|SQLITE_CORRUPT|SQLITE_NOTADB|not a database|file is encrypted or is not a database|database disk image is malformed|database corruption|database is corrupt|decode_slice_header|non-existing PPS|no frame' "$log_dir"/*.log 2>/dev/null | tail -n 80 || true)"
     print_plex_error_summary "$plex_errors"
     db_corruption_count="$(count_text_matches "$plex_errors" "$db_corruption_pattern")"
     db_busy_count="$(count_text_matches "$plex_errors" "$db_busy_pattern")"

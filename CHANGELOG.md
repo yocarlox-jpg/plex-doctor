@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+
+- Corrige falso positivo de corrupción DB causado por la palabra `corrupt` en nombres de archivos o fixups internos de Plex.
+- Limita la detección de corrupción a errores SQLite/DB explícitos como `SQLITE_CORRUPT`, `not a database` o `database disk image is malformed`.
+
 ## 0.4.1
 
 - Separa señales de DB corrupta de DB ocupada/bloqueada temporalmente.
