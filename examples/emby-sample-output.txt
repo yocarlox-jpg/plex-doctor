@@ -1,0 +1,59 @@
+════════════════════════════════════
+EMBY DOCTOR - RESUMEN
+════════════════════════════════════
+
+Servidor: emby-server
+Fecha: 2026-06-27T12:34:56+02:00
+Versión: 0.5.0
+
+EN CLARO:
+- Problema principal: almacenamiento/disco/SATA.
+- ¿Es real?: sí. SMART o el kernel han devuelto errores reales; no es que Emby Doctor no pueda comprobarlo.
+- Qué NO parece culpable: Emby, la DB de Emby, rclone o DNS no son la causa principal según esta ejecución.
+- Qué hacer ahora: priorizar backup/migración de datos y revisar disco, cable SATA, backplane, puerto o controladora.
+- Puntuación: 60/100. Baja sobre todo por alertas rojas de SMART/I/O.
+
+Sistema ............ 🟢 OK
+CPU ................ 🟢 OK
+RAM ................ 🟢 OK
+Discos ............. 🔴 Errores I/O
+Emby ............... 🟢 Running
+DB Emby ............ 🟢 Tamaño leído
+Transcoder ......... 🟡 5 procesos activos
+rclone ............. 🟢 OK
+Red ................ 🟢 OK
+
+Problemas detectados:
+🟡 transcodificación Emby activa con varios procesos (5)
+🔴 SMART alerta en /dev/sda
+🔴 SMART alerta en /dev/sdb
+🔴 errores I/O detectados en dmesg
+
+Notas informativas:
+ℹ️ Emby muestra errores H264/decode; normalmente apuntan a un archivo, stream o cliente concreto, no a un fallo global del servidor.
+
+Causa probable:
+El síntoma principal apunta a almacenamiento físico o enlace SATA: disco, cable, backplane, puerto o controladora.
+
+Interpretación:
+- Prioridad alta: almacenamiento físico o enlace SATA. SMART/I/O no es ruido de Emby; puede ser disco, cable, backplane, puerto o controladora.
+- Hay transcodificación activa. Esto puede explicar load alto o CPU alta, sobre todo con subtítulos quemados, audio EAC3/DTS o clientes poco compatibles.
+
+Plan de actuación recomendado:
+1. Confirmar versión: bash emby-doctor.sh --version.
+2. Tratar almacenamiento como prioridad: backup, revisar SMART completo y comprobar cable/backplane/puerto antes de culpar a Emby.
+3. Guardar /tmp/emby-doctor-full.log y comparar con una segunda ejecución cuando el problema esté ocurriendo.
+4. Evitar cambios destructivos hasta identificar causa: no borrar DB/cache ni desmontar rutas sin backup o ventana de mantenimiento.
+
+Comandos recomendados:
+- revisar transcodificaciones activas
+- hacer backup o migrar datos de /dev/sda cuanto antes
+- revisar SMART completo y estado físico del disco
+- hacer backup o migrar datos de /dev/sdb cuanto antes
+- revisar errores NVMe/SATA y salud de discos
+
+Puntuación salud: 60/100
+
+Logs guardados:
+- /tmp/emby-doctor-summary.txt
+- /tmp/emby-doctor-full.log
