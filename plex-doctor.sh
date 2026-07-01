@@ -502,7 +502,25 @@ collect_disks() {
   fi
 
   local high_usage high_inode iowait disk_names disk smart_output kernel_io
-  high_usage="$(df -P 2>/dev/null | awk 'NR>1 {gsub("%","",$5); if ($5 >= 95) print $6 " " $5 "%"}')"
+  # Sólo se evalúan filesystems de bloque reales. Se excluyen pseudo-FS y,
+  # sobre todo, los mounts fuse (rclone/sshfs/...), que reportan tamaños
+  # negativos o absurdos (p.ej. 5.0T / -8.0E / 8.0E) y falsean el análisis.
+  # Importante: el nombre del "Filesystem" de rclone puede contener espacios
+  # (p.ej. "02.SER:@3 ! CONTENIDO/02 SER"), lo que desplaza las columnas de df,
+  # así que NO se parsea por posición fija. Se identifica el Type por token
+  # (cualquier token que empiece por "fuse") y el % como el token "NN%".
+  high_usage="$(df -P 2>/dev/null | awk '
+    NR>1 {
+      skip=0; pct=""
+      for (i=1;i<=NF;i++) {
+        t=$i
+        if (t ~ /^fuse/ || t=="tmpfs" || t=="devtmpfs" || t=="squashfs" || t=="overlay" || t=="proc" || t=="sysfs" || t=="cgroup" || t=="cgroup2" || t=="autofs" || t=="rpc_pipefs") skip=1
+        if (t ~ /^[0-9]+%$/) pct=t
+      }
+      if (skip) next
+      gsub(/[^0-9]/,"",pct)
+      if (pct != "" && pct+0 >= 95) print $NF " " pct "%"
+    }')"
   if [[ -n "$high_usage" ]]; then
     DISK_STATUS="${BAD_ICON} Disco lleno"
     while IFS= read -r line; do
@@ -511,7 +529,18 @@ collect_disks() {
     add_recommendation "liberar espacio o revisar crecimiento de logs/cache"
   fi
 
-  high_inode="$(df -Pi 2>/dev/null | awk 'NR>1 {gsub("%","",$5); if ($5 >= 90) print $6 " " $5 "%"}')"
+  high_inode="$(df -Pi 2>/dev/null | awk '
+    NR>1 {
+      skip=0; pct=""
+      for (i=1;i<=NF;i++) {
+        t=$i
+        if (t ~ /^fuse/ || t=="tmpfs" || t=="devtmpfs" || t=="squashfs" || t=="overlay" || t=="proc" || t=="sysfs" || t=="cgroup" || t=="cgroup2" || t=="autofs" || t=="rpc_pipefs") skip=1
+        if (t ~ /^[0-9]+%$/) pct=t
+      }
+      if (skip) next
+      gsub(/[^0-9]/,"",pct)
+      if (pct != "" && pct+0 >= 90) print $NF " " pct "%"
+    }')"
   if [[ -n "$high_inode" ]]; then
     DISK_STATUS="${WARN_ICON} Inodos altos"
     while IFS= read -r line; do
